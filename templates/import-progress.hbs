@@ -1,0 +1,16 @@
+<section class="coc-import-progress" {{#unless progress.length}}hidden{{/unless}}>
+  {{#if progress.length}}
+  <fieldset class="standard-form">
+    <legend>{{localize 'coc-pdf-importer.Progress.Title'}}</legend>
+    {{#each progress}}
+    <div class="form-group coc-import-item">
+      <label title="{{this.name}}">{{this.name}}</label>
+      <span class="coc-import-status coc-import-{{this.status}}">{{this.label}}</span>
+    </div>
+    {{/each}}
+    {{#unless importing}}
+    <p class="hint">{{totalLabel}}</p>
+    {{/unless}}
+  </fieldset>
+  {{/if}}
+</section>

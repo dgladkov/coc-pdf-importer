@@ -1,0 +1,38 @@
+// Parse fixture PDF(s) and write the resulting characters as JSON to out/,
+// reporting the total and how many fell back to an "Unknown" name. Handy for
+// eyeballing parser output after a change.
+//
+//   npm run dump:json                 # every fixture -> out/<name>.json
+//   npm run dump:json -- "<file.pdf>" # just that one (resolved in fixtures/)
+//
+// Reads from fixtures/ (see fixtures/README.md); writes gitignored out/*.json.
+import fs from 'node:fs/promises';
+import process from 'node:process';
+import { processPDF } from '../src/process.ts';
+import { FIXTURES, OUT, pdfInputs, outPath } from './fixtures.ts';
+
+const inputs = await pdfInputs();
+if (inputs.length === 0) {
+  console.error(`No PDFs found in ${FIXTURES}/ — see fixtures/README.md.`);
+  process.exit(1);
+}
+
+await fs.mkdir(OUT, { recursive: true });
+
+for (const input of inputs) {
+  const output = outPath(input, '.json');
+  let buf: Buffer;
+  try {
+    buf = await fs.readFile(input);
+  } catch {
+    console.warn(`skip ${input} (not found)`);
+    continue;
+  }
+  const chars = await processPDF(new Uint8Array(buf));
+  await fs.writeFile(output, JSON.stringify(chars, null, 2));
+  console.log(
+    output,
+    'total=' + chars.length,
+    'Unknown=' + chars.filter((c) => c.name === 'Unknown').length
+  );
+}

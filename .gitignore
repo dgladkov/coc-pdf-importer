@@ -1,0 +1,8 @@
+module.js
+module.js.map
+pdf.worker.min.mjs
+node_modules/
+**/*.pdf
+out/
+build/
+golden/

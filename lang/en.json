@@ -1,0 +1,26 @@
+{
+  "coc-pdf-importer": {
+    "Settings": {
+      "Name": "Import PDF",
+      "Label": "Import",
+      "Hint": "Import the documents from the modern Chaosium PDF layout."
+    },
+    "Form": {
+      "Upload": "Choose files to upload"
+    },
+    "Progress": {
+      "Title": "Import progress",
+      "Pending": "Waiting…",
+      "Working": "Importing…",
+      "Created": "{created} actor(s) imported",
+      "CreatedWithErrors": "{created} imported, {failed} failed (see console)",
+      "Total": "Done — {created} actor(s) imported in total."
+    },
+    "Errors": {
+      "NoFiles": "Upload at least one file",
+      "ErrorProcessing": "Error processing file: {error}"
+    },
+    "ResultWithErrors": "CoC PDF Importer: created {created} actor(s), {failed} failed (see console).",
+    "ResultSuccess": "CoC PDF Importer: created {created} actor(s)."
+  }
+}

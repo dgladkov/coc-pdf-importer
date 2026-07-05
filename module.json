@@ -1,0 +1,40 @@
+{
+  "id": "coc-pdf-importer",
+  "title": "Call of Cthulhu PDF Importer",
+  "description": "Import actors from the official Chaosium materials",
+  "version": "1.0.0",
+  "compatibility": {
+    "minimum": "13",
+    "verified": "14"
+  },
+  "manifest": "https://github.com/dgladkov/coc-pdf-importer/releases/download/1.0.0/module.json",
+  "download": "https://github.com/dgladkov/coc-pdf-importer/releases/download/1.0.0/module.zip",
+  "authors": [
+    {
+      "name": "Dmitry Gladkov",
+      "email": "dmitry.gladkov@gmail.com",
+      "url": "https://github.com/dgladkov"
+    }
+  ],
+  "esmodules": [
+    "module.js"
+  ],
+  "languages": [
+    {
+      "lang": "en",
+      "name": "English",
+      "path": "lang/en.json"
+    }
+  ],
+  "relationships": {
+    "systems": [
+      {
+        "id": "CoC7",
+        "type": "system",
+        "compatibility": {
+          "minimum": "8.9"
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "name": "coc-pdf-importer",
+  "version": "1.0.0",
+  "description": "",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "node build.js",
+    "build:module": "node tools/build-module.js",
+    "dev": "node build.js --watch",
+    "type-check": "tsc --noEmit",
+    "test": "node --experimental-strip-types --import ./node-setup.ts --test ./src/*.test.ts",
+    "test:integration": "node --experimental-strip-types --import ./node-setup.ts --test ./test/integration/*.test.ts",
+    "dump:json": "node --experimental-strip-types --import ./node-setup.ts ./tools/dump-json.ts",
+    "dump:text": "node --experimental-strip-types --import ./node-setup.ts ./tools/dump.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "devDependencies": {
+    "@thednp/dommatrix": "^3.0.4",
+    "@types/node": "^26.1.0",
+    "esbuild": "^0.28.1",
+    "prettier": "3.9.4",
+    "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "math.sumprecise": "^1.0.1",
+    "pdfjs-dist": "^6.1.200"
+  }
+}
