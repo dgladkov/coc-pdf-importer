@@ -4,4 +4,6 @@
 import DOMMatrix from '@thednp/dommatrix';
 import 'math.sumprecise/auto'; // Automatically shims global.Math.sumPrecise
 
-global.DOMMatrix = DOMMatrix;
+// The polyfill implements the matrix methods pdf.js uses at runtime but not the
+// full DOM `DOMMatrix` static surface (fromFloat32Array, etc.), so cast to it.
+global.DOMMatrix = DOMMatrix as unknown as typeof globalThis.DOMMatrix;
