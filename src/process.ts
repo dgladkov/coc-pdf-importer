@@ -136,26 +136,36 @@ export function parseCocCharacters(
         )) ||
       parseHeader(text, strIndex, winStart, leftBound, NAME_LOOKBACK);
     // A last-resort section title for group tables whose heading is too tall /
-    // too far for the paths above (used only when no group name is found).
-    const sectionHeading = chunks
+    // too far for the paths above (used only when no group name is found), plus
+    // the offset where that title begins (to bound the previous block's body).
+    const sectionHeading: SectionHeading = chunks
       ? sectionHeadingFromChunks(chunks, strIndex, leftBound, bodyHeight)
-      : "";
+      : { text: "", start: -1 };
     return {
       strIndex,
       header,
       window,
       headerStart: header.headerStart,
-      sectionHeading,
+      sectionHeading: sectionHeading.text,
+      headingStart: sectionHeading.start,
     };
   });
 
   const characters: CocCharacter[] = [];
 
   anchors.forEach((strIndex, i) => {
-    // The block body runs from this STR to the next block's header (so the next
-    // name line is excluded), or to end of text for the final block.
-    const bodyEnd =
-      i + 1 < headers.length ? headers[i + 1].headerStart : text.length;
+    // The block body runs from this STR to the start of the next block's
+    // heading, or end of text for the final block. When the next block is a
+    // group table, its tall title run (and the column-number row after it) sits
+    // ahead of its name line; bound at that title so it doesn't trail into this
+    // block's last section.
+    let bodyEnd = text.length;
+    if (i + 1 < headers.length) {
+      const next = headers[i + 1];
+      bodyEnd = next.headerStart;
+      if (next.headingStart > strIndex && next.headingStart < bodyEnd)
+        bodyEnd = next.headingStart;
+    }
     const body = text.slice(strIndex, bodyEnd);
     const { name, age, description } = headers[i].header;
     // Text between this block's heading and its STR anchor. Some group tables
@@ -293,13 +303,25 @@ function headerFromChunks(
 // name a group table whose title is set at section-heading size and sits above
 // a descriptive blurb, far from the stat row ("CRAZED CREW OF THE DARK
 // MISTRESS"). Returns "" when the nearest over-body run isn't reached.
+// A section title (larger font) preceding the stat table, with the text offset
+// where that title run begins — used both as a fallback group name and, more
+// importantly, to bound the *previous* block's body: a group table's title is a
+// tall run sitting between the prior block's last section and this block's STR,
+// so the prior body must end where this title begins (else the title, and the
+// column-number row after it, leak into that block's trailing section).
+interface SectionHeading {
+  text: string;
+  start: number; // -1 when no distinct heading run was found
+}
+
 function sectionHeadingFromChunks(
   chunks: TextChunk[],
   strIndex: number,
   leftBound: number,
   bodyHeight: number,
-): string {
-  if (!bodyHeight) return "";
+): SectionHeading {
+  const none: SectionHeading = { text: "", start: -1 };
+  if (!bodyHeight) return none;
 
   let anchorIdx = -1;
   for (let k = 0; k < chunks.length; k++) {
@@ -308,7 +330,7 @@ function sectionHeadingFromChunks(
       break;
     }
   }
-  if (anchorIdx < 0) return "";
+  if (anchorIdx < 0) return none;
 
   // Skip body-height (or smaller) runs — the stats and the description blurb.
   let i = anchorIdx - 1;
@@ -319,19 +341,21 @@ function sectionHeadingFromChunks(
   )
     i--;
   if (i < 0 || chunks[i].start < leftBound || chunks[i].height <= bodyHeight)
-    return "";
+    return none;
 
   // Collect the contiguous run at this heading height (the title line).
   const height = chunks[i].height;
   const parts: string[] = [];
+  let start = chunks[i].start;
   for (
     let j = i;
     j >= 0 && chunks[j].height === height && chunks[j].start >= leftBound;
     j--
   ) {
     parts.unshift(chunks[j].text);
+    start = chunks[j].start;
   }
-  return clean(parts.join(" "));
+  return { text: clean(parts.join(" ")), start };
 }
 
 // Parse a clean heading run ("Jackson Elias , 41, fearless investigator",
@@ -1153,14 +1177,16 @@ function parseCombat(text: string): CombatEntry[] {
     )
     .trim();
 
-  // An attack name: an optional caliber dot, then a capital/digit start, then a
-  // run of name characters. Internal periods are allowed only as a caliber (a
-  // dot followed by a digit, e.g. "Colt .38 revolver") so a sentence-ending
+  // An attack name: an optional honorific ("Mrs. Carruthers (elephant gun)"),
+  // an optional caliber dot, then a capital/digit start, then a run of name
+  // characters. Internal periods are allowed only as an honorific or a caliber
+  // (a dot followed by a digit, e.g. "Colt .38 revolver") so a sentence-ending
   // period still can't be swallowed. Also NOT a bare dice token (e.g. the "1D4"
   // in a "1D3 + 1D4" damage bonus).
   // Also not the damage-bonus "DB", which trails a "+" in damage ("1D3 + DB Grab
   // (mnvr)") and must not be swallowed into the following attack's name.
-  const attackName = String.raw`(?!\d+[dD]\d+\b)(?!DB\b)\.?[A-Z0-9](?:[A-Za-z0-9 /'"+()#*-]|\.\d)*?`;
+  const honorific = String.raw`(?:(?:Mrs?|Ms|Dr|Mme|Mlle|Miss|Sgt|Capt|Col|Lt|St|Fr)\.\s+)?`;
+  const attackName = String.raw`${honorific}(?!\d+[dD]\d+\b)(?!DB\b)\.?[A-Z0-9](?:[A-Za-z0-9 /'"+()#*-]|\.\d)*?`;
   // The start of the next attack, used only to bound the damage of this one. An
   // attack profile is a value followed by a "(half/fifth)" or ", damage". The %
   // is optional (some Dodges read "Dodge 27 (13/5)") and a comma may sit before
