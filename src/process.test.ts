@@ -155,6 +155,57 @@ describe("parseCocCharacters (unit)", () => {
     assert.equal(dodge.half, 13);
   });
 
+  test("a bare 'or weapon' in brawl damage is dropped as redundant", () => {
+    const [c] = parseCocCharacters(
+      "Man, x STR 60 CON 60 SIZ 60 DEX 50 INT 50 APP 50 POW 50 EDU 50 SAN 50 HP 12 " +
+        "DB: +1D4 Build: 1 Move: 8 MP: 10 Combat Attacks per round: 1 " +
+        "Brawl 55% (27/11), damage 1D3+1D4 or weapon Dodge 25% (12/5)",
+    );
+    const brawl = c.combat.find((a) => a.name === "Brawl")!;
+    assert.equal(brawl.damage, "1D3+1D4"); // "or weapon" stripped
+    assert.equal(c.combat.some((a) => /weapon/i.test(a.name)), false);
+  });
+
+  test("a named 'or weapon' becomes its own capitalized combat entry", () => {
+    const [c] = parseCocCharacters(
+      "Thug, x STR 60 CON 60 SIZ 60 DEX 50 INT 50 APP 50 POW 50 EDU 50 SAN 50 HP 12 " +
+        "DB: +1D4 Build: 1 Move: 8 MP: 10 Combat Attacks per round: 1 " +
+        "Brawl 60% (30/12), damage 1D3+1D4 or cudgel 1D8+1D4 Dodge 25% (12/5)",
+    );
+    assert.deepEqual(
+      c.combat.map((a) => ({ name: a.name, value: a.value, damage: a.damage })),
+      [
+        { name: "Brawl", value: 60, damage: "1D3+1D4" },
+        { name: "Cudgel", value: 60, damage: "1D8+1D4" }, // shares the brawl %
+        { name: "Dodge", value: 25, damage: null },
+      ],
+    );
+  });
+
+  test("a comma/'or' list of weapon alternatives splits into one entry each", () => {
+    const [c] = parseCocCharacters(
+      "Brute, x STR 80 CON 60 SIZ 80 DEX 50 INT 50 APP 50 POW 50 EDU 50 SAN 50 HP 14 " +
+        "DB: +1D4 Build: 2 Move: 8 MP: 10 Combat Attacks per round: 1 " +
+        "Brawl 70% (35/14), damage 1D3+1D4, cudgel 1D6+1D4, or big club 1D8+1D4 Dodge 25% (12/5)",
+    );
+    assert.deepEqual(c.combat.slice(0, 3), [
+      { name: "Brawl", value: 70, half: 35, fifth: 14, damage: "1D3+1D4", note: null },
+      { name: "Cudgel", value: 70, half: 35, fifth: 14, damage: "1D6+1D4", note: null },
+      { name: "Big club", value: 70, half: 35, fifth: 14, damage: "1D8+1D4", note: null },
+    ]);
+  });
+
+  test("an 'or <prose>' with no weapon damage is left inline", () => {
+    const [c] = parseCocCharacters(
+      "Blob, horror STR 90 CON 90 SIZ 90 DEX 40 INT 40 APP — POW 60 EDU — SAN — HP 18 " +
+        "DB: +1D6 Build: 2 Move: 6 MP: 12 Combat Attacks per round: 1 " +
+        "Fighting 80% (40/16), damage 9D6 or it can choose to engulf the target Dodge 20% (10/4)",
+    );
+    const fighting = c.combat.find((a) => a.name === "Fighting")!;
+    assert.equal(fighting.damage, "9D6 or it can choose to engulf the target");
+    assert.equal(c.combat.length, 2); // Fighting + Dodge only, no phantom weapon
+  });
+
   test("skill/language entries shed qualifiers, prose, and unbalanced parens", () => {
     const [c] = parseCocCharacters(
       "Guard, watch STR 50 CON 50 SIZ 50 DEX 50 INT 50 APP 50 POW 50 EDU 50 SAN 50 HP 10 " +

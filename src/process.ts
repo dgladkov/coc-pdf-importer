@@ -1205,7 +1205,49 @@ function parseCombat(text: string): CombatEntry[] {
       note,
     });
   }
-  return out;
+  return out.flatMap(splitWeaponAlternatives);
+}
+
+// A Brawl/Fighting attack often lists weapon alternatives inline in its damage:
+//   "1D3+1D4 or blackjack 1D8+1D4"        -> Brawl 1D3+1D4, Blackjack 1D8+1D4
+//   "1D3, knife 1D4, or club 1D6"         -> Brawl 1D3, Knife 1D4, Club 1D6
+//   "1D3+1D4 or weapon" / "1D3 or by weapon" -> Brawl 1D3+1D4 / 1D3 (the bare
+//     "or weapon" is fully redundant with the brawl damage, so it's dropped)
+// Each named alternative becomes its own combat entry sharing the brawl skill's
+// value, and its name is capitalized. If any alternative is neither a named
+// weapon (with damage) nor a bare "or weapon" — e.g. prose like "9D6 or it can
+// choose to engulf the target" — the entry is left untouched.
+const BASE_DICE = String.raw`\d+[dD]\d+(?:\s*[+\-]\s*(?:\d+[dD]\d+|DB|\d+))*`;
+
+function splitWeaponAlternatives(entry: CombatEntry): CombatEntry[] {
+  if (!entry.damage || !/\b(?:brawl|fighting)\b/i.test(entry.name))
+    return [entry];
+  const m = new RegExp(String.raw`^(${BASE_DICE})\s*(.*)$`).exec(entry.damage);
+  if (!m) return [entry];
+  const base = m[1];
+  // Strip the separator that introduces the alternatives (",", "or", ", or"),
+  // tolerating leading footnote markers ("1D3+1D6** or fighting knife ...").
+  const rest = m[2].trim().replace(/^[\s*]*,?\s*(?:or\s+)?/i, "");
+  if (!rest) return [entry];
+
+  const weapons: CombatEntry[] = [];
+  for (const chunk of rest.split(/\s*,\s*(?:or\s+)?|\s+or\s+/i)) {
+    const alt = chunk.trim();
+    if (!alt) continue;
+    if (/^(?:by\s+)?weapons?$/i.test(alt)) continue; // redundant "or weapon"
+    const wm = /^(.*?\S)\s+(\d+[dD]\d+.*)$/.exec(alt);
+    if (!wm) return [entry]; // unrecognized prose -> leave the entry as-is
+    const { damage, note } = splitDamageNote(wm[2]);
+    weapons.push({
+      name: wm[1].charAt(0).toUpperCase() + wm[1].slice(1),
+      value: entry.value,
+      half: entry.half,
+      fifth: entry.fifth,
+      damage,
+      note,
+    });
+  }
+  return [{ ...entry, damage: base }, ...weapons];
 }
 
 // Split prose parentheticals off the damage string into a separate note, e.g.
