@@ -14,8 +14,8 @@ Tested on the following documents:
 - Doors to Darkness
 - Dead Light and Other Dark Turns
 
-Note that the importer will skeep large portions of important description prose,
-such as maneuver mechanics and creature flavor - consult the source document
+Note that the importer will skip large portions of important description prose,
+such as maneuver mechanics and creature flavor - consult the source documents
 when running the game.
 
 ## Usage
@@ -37,6 +37,8 @@ when running the game.
   step** for tests or tooling.
 - `npm install` to pull dependencies (`pdfjs-dist`, `math.sumprecise`, and the
   dev toolchain: `esbuild`, `typescript`, `prettier`, `@thednp/dommatrix`).
+- **7-Zip** is required only for `npm run build:module` (the release zip): the
+  `7z` CLI on Windows, `7zz` (p7zip) on Linux/macOS.
 
 ### How it works
 
@@ -61,8 +63,8 @@ when running the game.
   inside a live Foundry data dir)
 - `npm run build` - One-off production bundle to `module.js` (+ source map, +
   pdf.js worker)
-- `npm run build:module` - Clean **release** build into `build/` (manifest,
-  `module.js`, worker, `lang/`, `templates/`)
+- `npm run build:module` - **Release** build → `build/module.zip` +
+  `build/module.json` (requires 7-Zip)
 - `npm run type-check` - `tsc --noEmit` over `src/`, `test/`, `tools/` |
 - `npm test` - Unit tests (fast, fixture-free, CI)
 - `npm run test:integration` - Book-level tests + golden snapshots — **needs the
@@ -106,7 +108,12 @@ Without the worker shim, text extraction silently truncates glyph runs.
 
 ### Building for release
 
-`npm run build:module` assembles a clean `build/` directory with exactly the
-files Foundry ships: `module.json`, `module.js` (+ map), the shimmed
-`pdf.worker.min.mjs`, and the `lang/` and `templates/` folders. Zip that as the
-release artifact.
+`npm run build:module` produces two artifacts in `build/`:
+
+- `module.zip` — the installable module, packed with 7-Zip at ultra compression.
+  It contains `module.json`, `module.js` (+ source map), the shimmed
+  `pdf.worker.min.mjs`, and the `lang/` and `templates/` folders.
+- `module.json` — a copy of the manifest served next to the zip, so a release's
+  manifest URL can point at it while the download URL points at `module.zip`.
+
+7-Zip must be installed (`7z` on Windows, `7zz` on Linux/macOS).
