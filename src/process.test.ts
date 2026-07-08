@@ -128,6 +128,27 @@ describe("parseCocCharacters (unit)", () => {
     assert.equal(c.name, "Beast");
   });
 
+  test("a named-column 'char. A B roll' table uses the column labels", () => {
+    // The odd "average / rolls" layout puts the column labels between a "char."
+    // stat-name header and a "roll(s)" formula header, not at the row's tail;
+    // they must be read as the member labels ("Alpha"/"Beta"), not "1"/"2".
+    const cs = parseCocCharacters(
+      "MONSTERS Test Swarm char. Alpha Beta roll s (for beta form) " +
+        "STR 5 50 (3D6) ×5 CON 5 55 (3D6) ×5 SIZ 5 65 (2D6+6) ×5 " +
+        "POW 35 35 (2D6) ×5 DEX 80 65 (2D6+6) ×5 HP: 4 12 " +
+        "Average Damage Bonus: 0 Average Build: 0 Move: 8 " +
+        "Combat Attacks per round: 1 Fighting 40% (20/8), damage 1D6 " +
+        "Sanity loss: 0/1D6 to see them.",
+    );
+    assert.deepEqual(
+      cs.map((c) => ({ name: c.name, str: c.characteristics.STR?.value })),
+      [
+        { name: "Test Swarm Alpha", str: 5 },
+        { name: "Test Swarm Beta", str: 50 },
+      ],
+    );
+  });
+
   test('"up to N (...)" attacks-per-round is preserved', () => {
     const [c] = parseCocCharacters(
       "The Thing, horror STR 70 CON 70 SIZ 90 DEX 80 INT 80 APP — POW 100 EDU — SAN — HP 16 " +

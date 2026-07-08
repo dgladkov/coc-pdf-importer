@@ -738,10 +738,19 @@ function parseBlock(
   // resort use the section-heading title, which sits at section-heading size
   // above a blurb, too far / too tall for the paths above ("Crazed Crew of the
   // Dark Mistress").
-  const groupName =
+  let groupName =
     (isFurnitureName(windowGroup) ? "" : windowGroup) ||
     titleCaseTitle(name) ||
     groupNameFromPrefix(sectionHeading);
+  // Only when the name itself is recovered from the font-size heading is its
+  // trailing descriptor a reliable group description; otherwise a per-member
+  // "description" from the header window is leaked prose and stays dropped.
+  let groupDescription = "";
+  if (!groupName) {
+    const heading = headingName(sectionHeading);
+    groupName = heading.name;
+    groupDescription = heading.description;
+  }
   // Column labels are member names or ordinals, but letter-spaced PDF text can
   // shatter a name into fragments ("Fergie" -> "Fergi", "e"). Trust the label
   // row only when every column is a whole name / ordinal; otherwise number them.
@@ -761,9 +770,9 @@ function parseBlock(
     out.push({
       name: memberName || `Group ${j + 1}`,
       age,
-      // The group's identity is its qualified name; a per-member "description"
-      // recovered from the header window is unreliable leaked prose, so drop it.
-      description: "",
+      // A per-member description from the header window is unreliable leaked
+      // prose (dropped); a descriptor parsed off the group's own heading is not.
+      description: groupDescription,
       characteristics: characteristicsForColumn(cols, j),
       derived: derivedForColumn(cols, j),
       attacksPerRound,
@@ -927,6 +936,14 @@ function groupColumns(
   numCols: number,
 ): { groupName: string; labels: string[] } {
   const tokens = window.trim().split(/\s+/).filter(Boolean);
+
+  // A monster "average / rolls" table is the odd one out: its column labels sit
+  // *between* a "char." stat-name header and a "roll(s)" formula header, e.g.
+  // "char. Leech Host roll s (for host form)" — not at the row's tail. Pull the
+  // labels from that span when the layout is present.
+  const labelSpan = statTableLabelSpan(tokens, numCols);
+  if (labelSpan) return labelSpan;
+
   const labels = tokens.slice(-numCols);
   let prefix = tokens.slice(0, tokens.length - numCols).join(" ");
   // A "Use these profiles for ...." instruction commonly sits between the group
@@ -935,6 +952,53 @@ function groupColumns(
   const useMatch = /\bUse\s+(?:this|these|the following)\b/i.exec(prefix);
   if (useMatch) prefix = prefix.slice(0, useMatch.index);
   return { groupName: groupNameFromPrefix(prefix), labels };
+}
+
+// The column labels of a monster "average / rolls" table sit between its "char."
+// stat-name header and its "roll(s)" formula header ("char. Leech Host roll s
+// (for host form)"). Returns those labels (with the pre-"char." text as the
+// group-name prefix) when exactly numCols of them are found, else null so the
+// caller uses its normal tail-of-row heuristic.
+function statTableLabelSpan(
+  tokens: string[],
+  numCols: number,
+): { groupName: string; labels: string[] } | null {
+  let charIdx = -1;
+  for (let k = 0; k < tokens.length; k++)
+    if (/^char\.?$/i.test(tokens[k])) charIdx = k;
+  if (charIdx < 0) return null;
+
+  let rollIdx = -1;
+  for (let k = charIdx + 1; k < tokens.length; k++)
+    if (/^rolls?$/i.test(tokens[k])) {
+      rollIdx = k;
+      break;
+    }
+  if (rollIdx < 0) return null;
+
+  const labels = tokens.slice(charIdx + 1, rollIdx);
+  if (labels.length !== numCols || !labels.every(isMemberLabel)) return null;
+  return {
+    groupName: groupNameFromPrefix(tokens.slice(0, charIdx).join(" ")),
+    labels,
+  };
+}
+
+// Recover a group's name and descriptor from a font-size heading that carries a
+// trailing descriptor ("Million Favored Ones : Leeches, horrendous bloodsuckers"
+// -> name "Million Favored Ones: Leeches", description "horrendous bloodsuckers")
+// — the case groupNameFromPrefix can't reach because it stops at the lowercase
+// descriptor. Used only as a last resort.
+function headingName(sectionHeading: string): {
+  name: string;
+  description: string;
+} {
+  const parsed = parseNameRun(sectionHeading);
+  if (!parsed || !parsed.name) return { name: "", description: "" };
+  return {
+    name: titleFromHeading(parsed.name).replace(/\s*:\s*/g, ": ").trim(),
+    description: parsed.description,
+  };
 }
 
 // A column label is trustworthy when it is an ordinal ("3"), a table cell code

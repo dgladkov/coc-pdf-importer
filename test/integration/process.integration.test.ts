@@ -306,12 +306,11 @@ describe("Masks of Nyarlathotep", () => {
         .length,
       6,
     );
-    // "NPC N" remains only for the leech/host block — a two-form creature whose
-    // real name isn't recoverable — so no other group should fall back to it.
-    assert.equal(
-      chars.filter((c) => /^NPC \d+$/.test(c.name)).length,
-      2,
-      'an unexpected group fell back to "NPC N"',
+    // With that recovery — and the named-column and heading-name paths — no
+    // group falls back to a bare "NPC N".
+    assert.ok(
+      chars.every((c) => !/^NPC \d+$/.test(c.name)),
+      'a group fell back to "NPC N"',
     );
   });
 });
