@@ -1307,7 +1307,13 @@ function parseCombat(text: string): CombatEntry[] {
   // Also not the damage-bonus "DB", which trails a "+" in damage ("1D3 + DB Grab
   // (mnvr)") and must not be swallowed into the following attack's name.
   const honorific = String.raw`(?:(?:Mrs?|Ms|Dr|Mme|Mlle|Miss|Sgt|Capt|Col|Lt|St|Fr)\.\s+)?`;
-  const attackName = String.raw`${honorific}(?!\d+[dD]\d+\b)(?!DB\b)\.?[A-Z0-9](?:[A-Za-z0-9 /'"+()#*-]|\.\d)*?`;
+  // Parentheses inside a name must be a short, comma-free balanced group
+  // ("(mnvr)", "(thrown)", "(elephant gun)"), never a lone bracket or a
+  // comma-laden prose clause. A lone ")" would otherwise let a name swallow an
+  // effect clause up to the next "%" ("... failed) Hatchet (thrown) 40%"),
+  // truncating the current attack's damage; a comma-laden "(...)" would absorb a
+  // description ("(lashing out..., kicking..., or goring...) Fighting 40%").
+  const attackName = String.raw`${honorific}(?!\d+[dD]\d+\b)(?!DB\b)\.?[A-Z0-9](?:[A-Za-z0-9 /'"+#*-]|\([^),]*\)|\.\d)*?`;
   // The start of the next attack, used only to bound the damage of this one. An
   // attack profile is a value followed by a "(half/fifth)" or ", damage". The %
   // is optional (some Dodges read "Dodge 27 (13/5)") and a comma may sit before
@@ -1320,15 +1326,21 @@ function parseCombat(text: string): CombatEntry[] {
   // otherwise so verbose damage ("1D3 + damage bonus(1D4)") survives intact.
   const proseComma = String.raw`,\s+(?:if|when|this|these|then|but|following|followed|each|plus|note|see)\b`;
   const damage = String.raw`(.+?)(?=\s+${nextAttack}|\s+Dodge\b|\.(?:\s|$)|${proseComma}|$)`;
+  // A maneuver profile carries a prose effect instead of "damage X" after its
+  // "(half/fifth)" ("Garrote 45% (22/9), mnvr. to escape or suffer 1D6 damage
+  // per round"). Capture that clause as the note. It runs to the next attack /
+  // Dodge / end — not to a sentence period, since it can hold an abbreviation
+  // ("mnvr.").
+  const maneuverNote = String.raw`(?!damage\b)(.+?)(?=\s+${nextAttack}|\s+Dodge\b|$)`;
 
   // An attack is either:
-  //  - "NN% (half/fifth)" with optional ", damage X",
+  //  - "NN% (half/fifth)" with optional ", damage X" or ", <maneuver note>",
   //  - "NN%, damage X" with the (half/fifth) omitted, or
   //  - a bare "damage X" maneuver with no percentage (damage must start with a
   //    dice/number so effect prose like "Latch damage each round" is not read
   //    as an attack).
   const re = new RegExp(
-    String.raw`(${attackName})\s+(?:(\d{1,3})\s*%?\s*,?\s*(?:\(\s*(\d{1,3})\s*\/\s*(\d{1,3})\s*\)(?:\s*,?\s*damage\s+${damage})?|damage\s+${damage})|damage\s+(?=\d)${damage})`,
+    String.raw`(${attackName})\s+(?:(\d{1,3})\s*%?\s*,?\s*(?:\(\s*(\d{1,3})\s*\/\s*(\d{1,3})\s*\)(?:\s*,?\s*damage\s+${damage}|\s*,\s*${maneuverNote})?|damage\s+${damage})|damage\s+(?=\d)${damage})`,
     "g",
   );
 
@@ -1342,14 +1354,15 @@ function parseCombat(text: string): CombatEntry[] {
       half = Math.floor(value / 2);
       fifth = Math.floor(value / 5);
     }
-    const { damage, note } = splitDamageNote(match[5] ?? match[6] ?? match[7]);
+    const { damage, note } = splitDamageNote(match[5] ?? match[7] ?? match[8]);
+    const maneuver = match[6] ? clean(match[6]) : null;
     out.push({
       name: cleanCombatName(match[1]),
       value,
       half,
       fifth,
       damage,
-      note,
+      note: note ?? maneuver,
     });
   }
   return out.flatMap(splitWeaponAlternatives);

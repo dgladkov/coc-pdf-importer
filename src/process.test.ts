@@ -209,6 +209,52 @@ describe("parseCocCharacters (unit)", () => {
     assert.equal(dodge.half, 13);
   });
 
+  test("a maneuver profile's prose effect becomes the note, not lost", () => {
+    const [c] = parseCocCharacters(
+      "Man, x STR 60 CON 60 SIZ 60 DEX 50 INT 50 APP 50 POW 50 EDU 50 SAN 50 HP 12 " +
+        "DB: +1D4 Build: 1 Move: 8 MP: 10 Combat Attacks per round: 1 " +
+        // "(22/9)," is followed by an effect clause, not "damage X".
+        "Garrote 45% (22/9), mnvr. to escape or suffer 1D6 damage per round Dodge 45% (22/9)",
+    );
+    const garrote = c.combat.find((a) => a.name === "Garrote")!;
+    assert.equal(garrote.damage, null);
+    assert.equal(garrote.note, "mnvr. to escape or suffer 1D6 damage per round");
+    assert.ok(c.combat.some((a) => a.name === "Dodge"));
+  });
+
+  test("a '(...)' note in damage is not truncated by a following attack", () => {
+    const [c] = parseCocCharacters(
+      "Beast, x STR 60 CON 60 SIZ 60 DEX 50 INT 50 APP 50 POW 50 EDU 50 SAN 50 HP 12 " +
+        "DB: 0 Build: 0 Move: 8 MP: 10 Combat Attacks per round: 1 " +
+        // The "1)" inside "(minimum 1)" must not read as the start of the next
+        // attack; "failed)" must not let a name span to the next "%".
+        "Fighting 25% (12/5), damage 1D3-2 (minimum 1) Grab (mnvr) 25% (12/5), damage 1D4+1 + unconsciousness (if Hard CON roll failed) Dodge 25% (12/5)",
+    );
+    const fighting = c.combat.find((a) => a.name === "Fighting")!;
+    assert.equal(fighting.damage, "1D3-2");
+    assert.equal(fighting.note, "minimum 1");
+    const grab = c.combat.find((a) => a.name === "Grab (mnvr)")!;
+    assert.equal(grab.damage, "1D4+1 + unconsciousness");
+    assert.equal(grab.note, "if Hard CON roll failed");
+  });
+
+  test("a comma-laden '(...)' clause is not absorbed into an attack name", () => {
+    const [c] = parseCocCharacters(
+      "Thing, horror STR 80 CON 80 SIZ 90 DEX 40 INT 40 APP — POW 60 EDU — SAN — HP 21 " +
+        "DB: +2D6 Build: 3 Move: 4 MP: 12 Combat " +
+        // The attacks-per-round prose has a comma-laden parenthetical.
+        "Attacks per round: 1D4 malformed appendages (lashing out, kicking, or goring) " +
+        "Fighting 40% (20/8), damage 1D6+2D6 Dodge 17% (8/3)",
+    );
+    const fighting = c.combat.find((a) => a.name === "Fighting")!;
+    assert.ok(fighting, "Fighting attack should be recovered cleanly");
+    assert.equal(fighting.damage, "1D6+2D6");
+    assert.ok(
+      c.combat.every((a) => !/malformed/.test(a.name)),
+      "prose must not leak into an attack name",
+    );
+  });
+
   test("a bare 'or weapon' in brawl damage is dropped as redundant", () => {
     const [c] = parseCocCharacters(
       "Man, x STR 60 CON 60 SIZ 60 DEX 50 INT 50 APP 50 POW 50 EDU 50 SAN 50 HP 12 " +
