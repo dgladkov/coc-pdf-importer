@@ -107,9 +107,13 @@ export function parseCocCharacters(
 
   // A characteristics run always starts "STR <value>+ CON". Values are numbers
   // (optionally marked with *), or a lone "-" (an em/en dash for N/A stats),
-  // each optionally followed by a "(3D6 x 5)"-style roll formula.
-  const anchorRe =
-    /\bSTR\s+(?:\d{1,3}\*?|-)(?:\s*\([^)]*\))?(?:\s+(?:\d{1,3}\*?|-)(?:\s*\([^)]*\))?)*\s+CON\b/g;
+  // each optionally followed by a "(3D6 x 5)"-style roll formula and/or an
+  // "Average Rolls" multiplier printed after the formula ("45 (1D6+6) ×5").
+  const value = String.raw`(?:\d{1,3}\*?|-)(?:\s*\([^)]*\))?(?:\s*[×xX]\s*\d+)?`;
+  const anchorRe = new RegExp(
+    String.raw`\bSTR\s+${value}(?:\s+${value})*\s+CON\b`,
+    "g",
+  );
   const anchors = Array.from(text.matchAll(anchorRe), (m) => m.index ?? 0);
 
   // Resolve, for each anchor, the header that precedes it (the name/age line).
@@ -298,17 +302,17 @@ function headerFromChunks(
   return { ...parsed, headerStart: selected[0][0].start };
 }
 
-// The nearest heading run above body text (a section / group title), WITHOUT
-// the name-height guard headerFromChunks applies. Used only as a last resort to
-// name a group table whose title is set at section-heading size and sits above
-// a descriptive blurb, far from the stat row ("CRAZED CREW OF THE DARK
-// MISTRESS"). Returns "" when the nearest over-body run isn't reached.
-// A section title (larger font) preceding the stat table, with the text offset
-// where that title run begins — used both as a fallback group name and, more
-// importantly, to bound the *previous* block's body: a group table's title is a
-// tall run sitting between the prior block's last section and this block's STR,
-// so the prior body must end where this title begins (else the title, and the
-// column-number row after it, leak into that block's trailing section).
+// The nearest section/group title (a larger-font run above the body text),
+// WITHOUT the name-height guard headerFromChunks applies, plus the text offset
+// where that run begins. Two uses:
+//   - a last-resort name for a block whose title sits at section-heading size
+//     above a descriptive blurb, far from the stat row ("Lions and Big Cats",
+//     "CRAZED CREW OF THE DARK MISTRESS");
+//   - the offset bounds the *previous* block's body: a group title is a tall run
+//     between the prior block's last section and this block's STR, so the prior
+//     body must end where this title begins (else the title, and the column-
+//     number row after it, leak into that block's trailing section).
+// Returns { text: "", start: -1 } when no over-body run is reached.
 interface SectionHeading {
   text: string;
   start: number; // -1 when no distinct heading run was found
@@ -332,30 +336,39 @@ function sectionHeadingFromChunks(
   }
   if (anchorIdx < 0) return none;
 
-  // Skip body-height (or smaller) runs — the stats and the description blurb.
   let i = anchorIdx - 1;
-  while (
-    i >= 0 &&
-    chunks[i].start >= leftBound &&
-    chunks[i].height <= bodyHeight
-  )
-    i--;
-  if (i < 0 || chunks[i].start < leftBound || chunks[i].height <= bodyHeight)
-    return none;
+  while (i >= 0 && chunks[i].start >= leftBound) {
+    // Skip body-height (or smaller) runs — the stats and the description blurb.
+    while (
+      i >= 0 &&
+      chunks[i].start >= leftBound &&
+      chunks[i].height <= bodyHeight
+    )
+      i--;
+    if (i < 0 || chunks[i].start < leftBound || chunks[i].height <= bodyHeight)
+      return none;
 
-  // Collect the contiguous run at this heading height (the title line).
-  const height = chunks[i].height;
-  const parts: string[] = [];
-  let start = chunks[i].start;
-  for (
+    // Collect the contiguous run at this heading height (the title line).
+    const height = chunks[i].height;
+    const parts: string[] = [];
+    let start = chunks[i].start;
     let j = i;
-    j >= 0 && chunks[j].height === height && chunks[j].start >= leftBound;
-    j--
-  ) {
-    parts.unshift(chunks[j].text);
-    start = chunks[j].start;
+    for (
+      ;
+      j >= 0 && chunks[j].height === height && chunks[j].start >= leftBound;
+      j--
+    ) {
+      parts.unshift(chunks[j].text);
+      start = chunks[j].start;
+    }
+    const text = clean(parts.join(" "));
+    // A monster stat table prints an intermediate-sized "char. / average / roll"
+    // header row above its values; that is not the creature's title, so keep
+    // walking back (past the description) to the real heading above it.
+    if (!isFurnitureName(text)) return { text, start };
+    i = j;
   }
-  return { text: clean(parts.join(" ")), start };
+  return none;
 }
 
 // Parse a clean heading run ("Jackson Elias , 41, fearless investigator",
@@ -656,6 +669,9 @@ function parseBlock(
   // offsets used for name detection stay stable).
   body = normalizeLabels(body);
 
+  // Drop a name recovered from an "average / rolls" column-header row.
+  if (isFurnitureName(name)) name = "";
+
   const statHeader = body.slice(0, statHeaderEnd(body));
   const cols = tokenizeStatHeader(statHeader);
   const numCols = colCount(cols);
@@ -691,10 +707,15 @@ function parseBlock(
   if (numCols <= 1) {
     return [
       {
-        // Large Mythos creatures often have a long description blurb between their
-        // heading and STR, so no name is found nearby. Fall back to the name in
-        // their Sanity loss line ("... to see the Abomination").
-        name: name || nameFromSanityLoss(sanityLoss) || "Unknown",
+        // Large creatures often have a description blurb between their heading
+        // and STR, so no name is found nearby. Fall back to the font-size heading
+        // above the blurb ("Children of the Sphinx"), then to the name in their
+        // Sanity loss line ("... to see the Abomination").
+        name:
+          name ||
+          titleFromHeading(sectionHeading) ||
+          nameFromSanityLoss(sanityLoss) ||
+          "Unknown",
         age,
         description,
         characteristics: characteristicsForColumn(cols, 0),
@@ -718,7 +739,7 @@ function parseBlock(
   // above a blurb, too far / too tall for the paths above ("Crazed Crew of the
   // Dark Mistress").
   const groupName =
-    windowGroup ||
+    (isFurnitureName(windowGroup) ? "" : windowGroup) ||
     titleCaseTitle(name) ||
     groupNameFromPrefix(sectionHeading);
   // Column labels are member names or ordinals, but letter-spaced PDF text can
@@ -794,7 +815,16 @@ function tokenizeStatHeader(header: string): Map<string, string[]> {
     [...CHAR_LABELS, ...DERIVED_LABELS].map((l) => l.toUpperCase()),
   );
 
-  // Drop "(3D6 x 5)"-style roll formulas so they don't look like extra columns.
+  // Monster "average / rolls" blocks print a generation formula next to each
+  // value, tagged with an "×N" multiplier: "45 (1D6+6) ×5", "35 2D6 ×5". Drop
+  // the whole formula (parenthesised or bare dice) so the rolls column isn't
+  // counted as extra characters.
+  header = header.replace(
+    /(?:\([^)]*\)|\b\d*[dD]\d+(?:[+-]\d+)?)\s*[×xX]\s*\d+/g,
+    " ",
+  );
+  // Drop any remaining "(3D6 x 5)"-style roll formulas so they don't look like
+  // extra columns.
   header = header.replace(/\([^)]*\)/g, " ");
 
   let current: string | null = null;
@@ -912,6 +942,31 @@ function groupColumns(
 // lowercase fragment left behind by letter-spaced PDF text.
 function isMemberLabel(label: string): boolean {
   return /^[A-Za-z]?\d+$/.test(label) || /^[A-Z][A-Za-z'’.\-]+$/.test(label);
+}
+
+// Turn a font-size heading run into a title, repairing letter-spaced fragments
+// ("Lion s and Big Cats" -> "Lions and Big Cats", where the plural "s" was split
+// off). Returns "" for a furniture row so callers fall through.
+function titleFromHeading(heading: string): string {
+  const merged = clean(heading).replace(
+    /\b([A-Za-z]{2,})\s+([a-z])(?=\s|$)/g,
+    "$1$2",
+  );
+  if (!merged || isFurnitureName(merged)) return "";
+  return titleCaseTitle(merged);
+}
+
+// The "char. / average / rolls (for host form)" column-header row of a monster
+// "average / rolls" stat table is not a name. When name recovery lands on that
+// row (these blocks put the real name in a distant heading), it yields a string
+// made only of those words — reject it so the block falls back to a better
+// source (the Sanity-loss creature name, or the font-size heading).
+function isFurnitureName(name: string): boolean {
+  const words = name.split(/[\s(),.]+/).filter(Boolean);
+  return (
+    words.length > 0 &&
+    words.every((w) => /^(?:char|averages?|rolls?|for|host|form|s)$/i.test(w))
+  );
 }
 
 // Running-header / boilerplate words that are never part of a group's name.
@@ -1495,7 +1550,8 @@ function normalizeLabels(text: string): string {
     .replace(/\bDamage\s+Bonus(?=\s*:)/gi, "DB")
     .replace(/\bAverage\s+Build(?=\s*:)/gi, "Build")
     .replace(/\bMove\s+Rate(?=\s*:)/gi, "Move")
-    .replace(/\bMagic\s+Points?(?=\s*:)/gi, "MP");
+    .replace(/\bMagic\s+Points?(?=\s*:)/gi, "MP")
+    .replace(/\bHit\s+Points?(?=\s*:)/gi, "HP");
 }
 
 function clean(value: unknown): string {

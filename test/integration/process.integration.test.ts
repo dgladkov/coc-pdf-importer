@@ -149,14 +149,11 @@ describe("Masks of Nyarlathotep", () => {
     assert.equal(c.characteristics.SAN!.value, 76);
     assert.equal(c.derived.Luck, 80);
     assert.equal(c.derived.DB, "+1D4");
-    // Multi-attack combat: brawl (with "or weapon"), revolver, dodge.
+    // Multi-attack combat: brawl (redundant "or weapon" dropped), revolver, dodge.
     const revolver = c.combat.find((a) => a.name === ".45 revolver");
     assert.ok(revolver, ".45 revolver attack missing");
     assert.equal(revolver!.damage, "1D10+2");
-    assert.equal(
-      c.combat.find((a) => a.name === "Brawl")!.damage,
-      "1D3+1D4 or weapon",
-    );
+    assert.equal(c.combat.find((a) => a.name === "Brawl")!.damage, "1D3+1D4");
     assert.ok(c.combat.some((a) => a.name === "Dodge"));
     // Languages parsed separately from skills.
     assert.equal(c.languages["English"], 85);
@@ -194,11 +191,13 @@ describe("Masks of Nyarlathotep", () => {
       c.combat.some((a) => a.name === "Colt .38 revolver"),
       "Colt .38 revolver should be one attack, not split at the dot",
     );
-    // "Colt" must not leak into the previous attack's damage.
-    assert.equal(
-      c.combat.find((a) => a.name === "Brawl")!.damage,
-      "1D3+1D4 or blackjack 1D8+1D4",
-    );
+    // "Colt" must not leak into the previous attack's damage; the inline
+    // "or blackjack 1D8+1D4" splits into its own weapon sharing the brawl skill.
+    assert.equal(c.combat.find((a) => a.name === "Brawl")!.damage, "1D3+1D4");
+    const blackjack = c.combat.find((a) => a.name === "Blackjack");
+    assert.ok(blackjack, "Blackjack should split into its own weapon");
+    assert.equal(blackjack!.damage, "1D8+1D4");
+    assert.equal(blackjack!.value, 60);
   });
 
   test("page furniture spanning a page break is stripped from combat", () => {
@@ -244,11 +243,14 @@ describe("Masks of Nyarlathotep", () => {
     const revolver = c.combat.find((a) => a.name === ".22 revolver")!;
     assert.equal(revolver.value, 30);
     assert.equal(revolver.damage, "1D6");
-    // The brawl damage must not swallow the following attacks.
-    assert.equal(
-      c.combat.find((a) => a.name === "Brawl")!.damage,
-      "1D3 or small knife/straight razor 1D4",
+    // The brawl damage must not swallow the following attacks; the inline
+    // "or small knife/straight razor 1D4" splits into its own weapon.
+    assert.equal(c.combat.find((a) => a.name === "Brawl")!.damage, "1D3");
+    const knife = c.combat.find(
+      (a) => a.name === "Small knife/straight razor",
     );
+    assert.ok(knife, "small knife/straight razor should split into its own weapon");
+    assert.equal(knife!.damage, "1D4");
   });
 
   test("Bloody Tongue Cultists — group table expands to 8 members", () => {
@@ -304,10 +306,12 @@ describe("Masks of Nyarlathotep", () => {
         .length,
       6,
     );
-    // With that recovery, no group falls back to a bare "NPC N".
-    assert.ok(
-      chars.every((c) => !/^NPC \d+$/.test(c.name)),
-      'a group fell back to "NPC N"',
+    // "NPC N" remains only for the leech/host block — a two-form creature whose
+    // real name isn't recoverable — so no other group should fall back to it.
+    assert.equal(
+      chars.filter((c) => /^NPC \d+$/.test(c.name)).length,
+      2,
+      'an unexpected group fell back to "NPC N"',
     );
   });
 });

@@ -95,6 +95,39 @@ describe("parseCocCharacters (unit)", () => {
     assert.equal(b.name, "Ghoul Ravenous Bone-Gnawers 1");
   });
 
+  test('a monster "average / rolls" block parses as one creature, not columns', () => {
+    // The generation formula next to each value ("(1D6+6) ×5", bare "2D6 ×5")
+    // and the "Average / Rolls" header row must not be read as extra columns or
+    // as the creature's name; "Hit Points:" is recognised as HP.
+    const [c, ...rest] = parseCocCharacters(
+      "MONSTERS  Test Swarm , mutated monsters  Average  Rolls  " +
+        "STR 45 (1D6+6) ×5 CON 65 (2D6+6) ×5 SIZ 55 (2D6+4) ×5 " +
+        "POW 35 2D6 ×5 DEX 45 (2D6+2) ×5 Hit Points: 12 " +
+        "Average Damage Bonus: 0 Average Build: 0 Move: 7 Luck: — " +
+        "Combat Attacks per round: 1 Fighting 45% (22/9), damage 1D3 Dodge n/a " +
+        "Sanity loss: 0/1D3 to see the swarm.",
+    );
+    assert.equal(rest.length, 0); // one creature, not an "Average"/"Rolls" pair
+    assert.equal(c.name, "Test Swarm");
+    assert.equal(c.characteristics.STR?.value, 45);
+    assert.equal(c.characteristics.POW?.value, 35);
+    assert.equal(c.characteristics.HP?.value, 12);
+    assert.equal(c.sanityLoss, "0/1D3 to see the swarm");
+  });
+
+  test("a bare 'roll'/'char.'/'average' header row is not used as a name", () => {
+    const [c] = parseCocCharacters(
+      "char. average roll s STR 70 (4D6) ×5 CON 65 (2D6+6) ×5 SIZ 50 (3D6) ×5 " +
+        "INT 50 (3D6) ×5 POW 50 (3D6) ×5 DEX 35 (2D6) ×5 Hit Points: 11 " +
+        "DB: 0 Build: 0 Move: 7 Combat Attacks per round: 1 Fighting 40% (20/8), damage 1D6 " +
+        "Sanity loss: 0/1D6 to see the beast.",
+    );
+    assert.notEqual(c.name, "roll");
+    assert.notEqual(c.name, "char. average roll");
+    // Falls back to the creature named in the Sanity-loss line.
+    assert.equal(c.name, "Beast");
+  });
+
   test('"up to N (...)" attacks-per-round is preserved', () => {
     const [c] = parseCocCharacters(
       "The Thing, horror STR 70 CON 70 SIZ 90 DEX 80 INT 80 APP — POW 100 EDU — SAN — HP 16 " +
