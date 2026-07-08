@@ -376,7 +376,11 @@ function sectionHeadingFromChunks(
 function parseNameRun(
   runText: string,
 ): { name: string; age: number | null; description: string } | null {
-  const heading = clean(runText).replace(/^Name\s*:?\s*/i, "");
+  // Drop a leading "Name:" label, then repair a letter-spaced colon inside the
+  // heading ("Million Favored Ones : The Dead" -> "... Ones: The Dead").
+  const heading = clean(runText)
+    .replace(/^Name\s*:?\s*/i, "")
+    .replace(/\s+:\s*/g, ": ");
   if (!heading) return null;
 
   const ageMatch = /,\s*(?:age\s+|appears\s+)?(\d{1,3})\+?\s*(?:,|$)/i.exec(
@@ -995,10 +999,8 @@ function headingName(sectionHeading: string): {
 } {
   const parsed = parseNameRun(sectionHeading);
   if (!parsed || !parsed.name) return { name: "", description: "" };
-  return {
-    name: titleFromHeading(parsed.name).replace(/\s*:\s*/g, ": ").trim(),
-    description: parsed.description,
-  };
+  // parseNameRun already normalises the letter-spaced colon in the name.
+  return { name: titleFromHeading(parsed.name), description: parsed.description };
 }
 
 // A column label is trustworthy when it is an ordinal ("3"), a table cell code
