@@ -545,6 +545,29 @@ describe("parseCocCharacters (unit)", () => {
     assert.equal(cs[0].characteristics.INT!.value, 40);
   });
 
+  // A set of separate single-column stat lines (e.g. paired NPCs or a creature's
+  // two forms) shares one Combat/Skills section printed after the last line; a
+  // "bare" earlier line inherits it instead of coming out empty.
+  test("a bare stat line inherits the set's shared trailing section", () => {
+    const cs = parseCocCharacters(
+      "Mr. Foo, servant STR 80 CON 120 SIZ 60 DEX 20 INT 65 APP 45 POW 50 EDU 40 SAN 40 HP 18 " +
+        "DB: +1D4 Build: 1 Move: 6 MP: 10 " +
+        "Mrs. Foo, servant STR 65 CON 140 SIZ 80 DEX 20 INT 70 APP 40 POW 40 EDU 40 SAN 40 HP 22 " +
+        "DB: +1D4 Build: 1 Move: 6 MP: 8 " +
+        "Combat Attacks per round: 1 (brawl or hook) Fighting 40% (20/8), damage 1D3+1D4 " +
+        "Hook 40% (20/8), damage 1D6+1D4 Dodge 10% (5/2)",
+    );
+    assert.equal(cs.length, 2);
+    // The first line is bare (only characteristics) but inherits the shared
+    // Combat printed after the second line.
+    assert.deepEqual(
+      cs[0].combat.map((a) => a.name),
+      ["Fighting", "Hook", "Dodge"],
+    );
+    assert.equal(cs[0].attacksPerRound, "1 (brawl or hook)");
+    assert.equal(cs[1].combat.length, 3); // the second keeps it from its own body
+  });
+
   // Bulleted label words are list items in bled-in appendix prose, not this
   // block's section headings, so they must not populate the section.
   test("a bulleted label in trailing prose is not a section heading", () => {

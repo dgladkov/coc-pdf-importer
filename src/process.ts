@@ -155,25 +155,17 @@ export function parseCocCharacters(
     };
   });
 
-  const characters: CocCharacter[] = [];
-
-  anchors.forEach((strIndex, i) => {
-    // The block body runs from this STR to the start of the next block's
-    // heading, or end of text for the final block. When the next block is a
-    // group table, its tall title run (and the column-number row after it) sits
-    // ahead of its name line; bound at that title so it doesn't trail into this
-    // block's last section.
+  // The body of each block runs from its STR to the start of the next block.
+  const blocks = anchors.map((strIndex, i) => {
+    // Bound at the next block's section-title heading when it has one: the title
+    // reliably delimits the next block even when that block's name heuristic
+    // reached back past the title into this block (so its headerStart is not
+    // trustworthy); otherwise end at the next name line.
     let bodyEnd = text.length;
     if (i + 1 < headers.length) {
       const next = headers[i + 1];
-      // End at the next block's section-title heading when it has one. The title
-      // reliably delimits the next block even when that block's name heuristic
-      // reached back past the title into this block (so its headerStart is not
-      // trustworthy); otherwise end at the next name line.
       bodyEnd = next.headingStart > strIndex ? next.headingStart : next.headerStart;
     }
-    const body = text.slice(strIndex, bodyEnd);
-    const { name, age, description } = headers[i].header;
     // Text between this block's start and its STR anchor. Some group tables print
     // the shared Combat/Skills sections here, ahead of the stat table. Start at
     // the section-title heading when the name heuristic reached back past it into
@@ -182,17 +174,40 @@ export function parseCocCharacters(
       headers[i].headingStart > headers[i].headerStart
         ? headers[i].headingStart
         : headers[i].headerStart;
-    const preTable = text.slice(blockStart, strIndex);
+    return {
+      strIndex,
+      body: text.slice(strIndex, bodyEnd),
+      preTable: text.slice(blockStart, strIndex),
+    };
+  });
 
+  const characters: CocCharacter[] = [];
+
+  blocks.forEach((block, i) => {
+    // A "bare" stat line carries only characteristics — no Combat/Skills/Sanity
+    // of its own. Such lines belong to a set (e.g. "Mr. Smith" then "Mrs. Smith",
+    // or a creature's two forms) whose shared section is printed after the last
+    // line, so inherit it from the next section-bearing block in the run.
+    let sharedTail = "";
+    if (!bodyHasSections(block.body)) {
+      for (let j = i + 1; j < blocks.length; j++) {
+        if (bodyHasSections(blocks[j].body)) {
+          sharedTail = blocks[j].body;
+          break;
+        }
+      }
+    }
+    const { name, age, description } = headers[i].header;
     characters.push(
       ...parseBlock(
-        body,
+        block.body,
         headers[i].window,
         name,
         age,
         description,
         headers[i].sectionHeading,
-        preTable,
+        block.preTable,
+        sharedTail,
       ),
     );
   });
@@ -676,6 +691,7 @@ function parseBlock(
   description: string,
   sectionHeading = "",
   preTable = "",
+  sharedTail = "",
 ): CocCharacter[] {
   // Rewrite spelled-out derived labels here (done per block so global text
   // offsets used for name detection stay stable).
@@ -691,8 +707,14 @@ function parseBlock(
   // Group layouts sometimes print the shared Combat/Skills/Languages sections
   // *before* the stat table, so they precede STR and land in `preTable` rather
   // than `body`. For multi-column groups, fall back to that region.
+  // A group's shared sections may be printed *before* the stat table (in
+  // `preTable`); a set of separate single-column stat lines (e.g. "Mr. Smith"
+  // then "Mrs. Smith", or a creature's two forms) instead shares one Combat /
+  // Skills / Sanity section printed *after* the last line, supplied here as
+  // `sharedTail`. Both are last-resort fallbacks behind the block's own body.
   const fallback = numCols > 1 ? preTable : "";
-  const combatText = combatSection(body) || combatSection(fallback);
+  const combatText =
+    combatSection(body) || combatSection(fallback) || combatSection(sharedTail);
   const attacksPerRound = parseAttacksPerRound(combatText);
   let combat = parseCombat(combatText);
   // Some (esp. pre-generated investigator) sheets list attack profiles with no
@@ -704,15 +726,21 @@ function parseBlock(
   if (numCols <= 1 && !combat.length && !combatText)
     combat = parseCombat(statHeader);
   const skills = parseKeyedList(
-    sectionBody(body, "Skills") || sectionBody(fallback, "Skills"),
+    sectionBody(body, "Skills") ||
+      sectionBody(fallback, "Skills") ||
+      sectionBody(sharedTail, "Skills"),
   );
   const languages = parseKeyedList(
-    sectionBody(body, "Languages") || sectionBody(fallback, "Languages"),
+    sectionBody(body, "Languages") ||
+      sectionBody(fallback, "Languages") ||
+      sectionBody(sharedTail, "Languages"),
   );
   const spells = parseSpells(
-    sectionBody(body, "Spells") || sectionBody(fallback, "Spells"),
+    sectionBody(body, "Spells") ||
+      sectionBody(fallback, "Spells") ||
+      sectionBody(sharedTail, "Spells"),
   );
-  const sanityLoss = parseSanityLoss(body);
+  const sanityLoss = parseSanityLoss(body) || parseSanityLoss(sharedTail);
   const note = parseNoteBeforeCombat(body);
   const notes = note ? [note] : [];
 
@@ -1200,6 +1228,22 @@ function groupNameFromPrefix(prefix: string): string {
 // ---------------------------------------------------------------------------
 
 // Text of a labelled section, from the label to the next section label.
+// Whether a block body carries any section of its own (a section heading, an
+// attack profile, an "Attacks per round" line, or a Sanity loss) rather than
+// only characteristics. A bare stat line inherits the shared section of the set
+// it belongs to; a body with sections keeps its own.
+function bodyHasSections(body: string): boolean {
+  const masked = maskParens(body);
+  for (const label of SECTION_LABELS) {
+    if (findLabel(masked, label) >= 0) return true;
+  }
+  return (
+    /\d{1,3}\s*%\s*\(\s*\d/.test(body) || // "40% (20/8)" attack profile
+    /Sanity\s+Loss\s*:/i.test(body) ||
+    /Attacks?\s+per\s+round/i.test(body)
+  );
+}
+
 function sectionBody(body: string, label: string): string {
   const maskedBody = maskParens(body);
   const startIdx = findLabel(maskedBody, label);
