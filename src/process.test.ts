@@ -545,6 +545,44 @@ describe("parseCocCharacters (unit)", () => {
     assert.equal(cs[0].characteristics.INT!.value, 40);
   });
 
+  // An inline "Special: ..." note among the attack prose must not end the combat
+  // section before the real attack profiles that follow it.
+  test('an inline "Special:" note does not truncate combat', () => {
+    const [c] = parseCocCharacters(
+      "Avatar, foul STR 200 CON 80 SIZ 90 DEX 35 INT 15 APP — POW 75 EDU — SAN — HP 17 " +
+        "DB: +3D6 Build: 4 Move: 10 MP: 15 " +
+        "Attacks per round: 1 (pseudopod, pustule) " +
+        "Fighting attacks: it reaches out with formless pseudopods. " +
+        "Special: its stench forces a CON roll or nausea. " +
+        "Fighting 85% (42/17), damage 7D6 " +
+        "Exploding pustule 100% (50/20), damage 2D10 Dodge 30% (15/6)",
+    );
+    assert.deepEqual(
+      c.combat.map((a) => a.name),
+      ["Fighting", "Exploding pustule", "Dodge"],
+    );
+    assert.equal(c.combat.find((a) => a.name === "Fighting")!.damage, "7D6");
+  });
+
+  // A prose "... 1 point of Sanity loss ..." note among the attack description
+  // must not end the combat section before the real attack profiles.
+  test('an inline "Sanity loss" mention does not truncate combat', () => {
+    const [c] = parseCocCharacters(
+      "Horror, vast STR 200 CON 400 SIZ 250 DEX 45 INT 30 APP — POW 90 EDU — SAN — HP 65 " +
+        "DB: +10D6 Build: 12 Move: 8 MP: 18 " +
+        "Attacks per round: 1 (crush) " +
+        "Howl: a blood-curdling cry which inflicts 1 point of Sanity loss upon all who hear it. " +
+        "Fighting 85% (42/17), damage 1D6+10D6 Dodge 30% (15/6) " +
+        "Sanity Loss: 1D6/1D20 Sanity points to see the horror",
+    );
+    assert.deepEqual(
+      c.combat.map((a) => a.name),
+      ["Fighting", "Dodge"],
+    );
+    // The real Sanity Loss line is still parsed independently.
+    assert.match(c.sanityLoss ?? "", /1D6\/1D20/);
+  });
+
   // A set of separate single-column stat lines (e.g. paired NPCs or a creature's
   // two forms) shares one Combat/Skills section printed after the last line; a
   // "bare" earlier line inherits it instead of coming out empty.

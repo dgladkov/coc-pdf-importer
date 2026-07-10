@@ -870,12 +870,19 @@ function findLabel(masked: string, label: string, min = 0): number {
 }
 
 // Index of the earliest section label in `masked` (a paren-masked string), or
-// its length when none is found. `exclude` skips one label (case-insensitive)
-// and matches before `min` are ignored.
-function nextSectionLabel(masked: string, exclude = "", min = 0): number {
+// its length when none is found. `exclude` skips one or more labels
+// (case-insensitive) and matches before `min` are ignored.
+function nextSectionLabel(
+  masked: string,
+  exclude: string | string[] = "",
+  min = 0,
+): number {
+  const skip = new Set(
+    (Array.isArray(exclude) ? exclude : [exclude]).map((s) => s.toLowerCase()),
+  );
   let end = masked.length;
   for (const label of SECTION_LABELS) {
-    if (label.toLowerCase() === exclude.toLowerCase()) continue;
+    if (skip.has(label.toLowerCase())) continue;
     const idx = findLabel(masked, label, min);
     if (idx >= 0 && idx < end) end = idx;
   }
@@ -1244,14 +1251,18 @@ function bodyHasSections(body: string): boolean {
   );
 }
 
-function sectionBody(body: string, label: string): string {
+function sectionBody(
+  body: string,
+  label: string,
+  extraExclude: string[] = [],
+): string {
   const maskedBody = maskParens(body);
   const startIdx = findLabel(maskedBody, label);
   if (startIdx < 0) return "";
 
   const start = startIdx + label.length;
   const rest = body.slice(start);
-  const end = nextSectionLabel(maskParens(rest), label);
+  const end = nextSectionLabel(maskParens(rest), [label, ...extraExclude]);
   return clean(rest.slice(0, end));
 }
 
@@ -1261,8 +1272,17 @@ function sectionBody(body: string, label: string): string {
 // back to the region beginning at "Attacks per round" so the profiles that
 // follow the attack prose ("Fighting 80% (40/16), damage 3D6 ...") are still
 // found. Returns "" when neither anchor is present.
+//
+// "Special" / "Powers" / "Sanity Loss" do not bound the combat text: a monster's
+// attack lines are often preceded by inline notes ("Special: ...", or a Howl that
+// "inflicts 1 point of Sanity loss ..."), with the real profiles after them.
+// parseCombat only extracts "NN% (h/f)" rows, so reading past such a note is safe
+// — a genuine Special Powers / Sanity Loss section carries prose, not profiles,
+// and parseSanityLoss finds the real Sanity line independently — while
+// Skills/Spells/Languages/Armor still stop the section.
+const COMBAT_SKIP = ["Combat", "Special", "Powers", "Sanity Loss"];
 function combatSection(body: string): string {
-  const labelled = sectionBody(body, "Combat");
+  const labelled = sectionBody(body, "Combat", ["Special", "Powers", "Sanity Loss"]);
   if (labelled) return labelled;
 
   const match = /Attacks\s+per\s+round/i.exec(maskParens(body));
@@ -1270,7 +1290,7 @@ function combatSection(body: string): string {
 
   const rest = body.slice(match.index);
   // min 1 so the leading "Attacks per round" match itself isn't a boundary.
-  const end = nextSectionLabel(maskParens(rest), "Combat", 1);
+  const end = nextSectionLabel(maskParens(rest), COMBAT_SKIP, 1);
   return clean(rest.slice(0, end));
 }
 
