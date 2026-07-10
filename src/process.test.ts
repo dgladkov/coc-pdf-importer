@@ -564,6 +564,23 @@ describe("parseCocCharacters (unit)", () => {
     assert.equal(c.combat.find((a) => a.name === "Fighting")!.damage, "7D6");
   });
 
+  // A parenthetical with an abbreviating period ("(inc. Driver Ant Column)")
+  // must not end the comma-separated spell list early.
+  test("a spell list is not truncated by a period inside a parenthetical", () => {
+    const [c] = parseCocCharacters(
+      "Sorcerer, vile STR 50 CON 50 SIZ 50 DEX 50 INT 80 APP 50 POW 90 EDU 80 SAN 20 HP 10 " +
+        "DB: 0 Build: 0 Move: 8 MP: 18 " +
+        "Spells: Bind Animal (inc. Driver Ant Column), Call Cthugha, " +
+        "Contact Nyarlathotep, Voorish Sign. See Appendix B.",
+    );
+    assert.deepEqual(c.spells, [
+      "Bind Animal",
+      "Call Cthugha",
+      "Contact Nyarlathotep",
+      "Voorish Sign",
+    ]);
+  });
+
   // An auto-hit attack reads "automatic" where a skill % would sit and may carry
   // a non-dice damage ("Energy Blast automatic, damage, 20 points").
   test("an auto-hit attack with a non-dice damage is captured", () => {

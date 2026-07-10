@@ -1316,15 +1316,17 @@ function parseSpells(text: string): string[] {
     return names;
   }
 
+  // Strip parentheticals first: they may hold a comma ("(see ... box, nearby)")
+  // or an abbreviating period ("Bind Animal (inc. Driver Ant Column)") that would
+  // otherwise split the list or end it early.
+  const stripped = text.replace(/\([^)]*\)/g, " ");
+
   // Comma-separated names. The list ends at the first sentence period (anything
   // after it, e.g. "Magical Artifact: ...", is not part of the list).
-  const sentenceEnd = text.search(/\.\s/);
-  const list = sentenceEnd >= 0 ? text.slice(0, sentenceEnd) : text;
+  const sentenceEnd = stripped.search(/\.\s/);
+  const list = sentenceEnd >= 0 ? stripped.slice(0, sentenceEnd) : stripped;
 
-  // Parentheticals may contain commas ("(see ... box, nearby)"), so strip them
-  // before splitting; drop trailing prose like "and others as the Keeper wishes".
   return list
-    .replace(/\([^)]*\)/g, " ")
     .split(/\s*,\s*/)
     .map((s) => clean(s.replace(/[*✝‡†●]/g, ""))) // drop "see description" markers
     .filter(
