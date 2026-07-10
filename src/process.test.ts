@@ -478,4 +478,53 @@ describe("parseCocCharacters (unit)", () => {
     );
     assert.equal(c.sanityLoss, null);
   });
+
+  // A lowercase section-label word in combat prose ("its special power",
+  // "ignores any armor", "engage in combat") must not end the Combat section
+  // before its real attack lines are reached.
+  test("lowercase label words in combat prose do not truncate combat", () => {
+    const [c] = parseCocCharacters(
+      "Prowler, night-thing STR 90 CON 110 SIZ 60 DEX 35 INT 80 APP — POW 90 EDU — SAN — HP 17 " +
+        "DB: +1D4 Build: 1 Move: 9 MP: 18 " +
+        "Combat Attacks per round: 1 (claw or special power). " +
+        "Fighting: the creature opens with its special power, ignoring any armor, before it will engage in combat directly. " +
+        "Fighting 50% (25/10), damage 1D6+1D4 " +
+        "Grab (mnvr) 50% (25/10), holds the victim fast " +
+        "Dodge 17% (8/3) Skills Stealth 80%",
+    );
+    const names = c.combat.map((a) => a.name);
+    assert.ok(names.includes("Fighting"), `Fighting captured (got ${names})`);
+    assert.ok(names.includes("Dodge"), `Dodge captured (got ${names})`);
+    const fighting = c.combat.find((a) => a.name === "Fighting")!;
+    assert.equal(fighting.damage, "1D6+1D4");
+    const grab = c.combat.find((a) => /Grab/.test(a.name))!;
+    assert.equal(grab.note, "holds the victim fast");
+  });
+
+  // Capitalised (Title-case and ALL-CAPS) headings still bound sections.
+  test("an ALL-CAPS section heading still bounds the combat section", () => {
+    const [c] = parseCocCharacters(
+      "Beast, x STR 80 CON 80 SIZ 80 DEX 50 INT 40 APP 40 POW 50 EDU 40 SAN 40 HP 16 " +
+        "DB: +1D6 Build: 2 Move: 8 MP: 10 Combat Fighting 50% (25/10), damage 1D6 Dodge 25% (12/5) " +
+        "SKILLS Climb 40% Stealth 60%",
+    );
+    assert.deepEqual(
+      c.combat.map((a) => a.name),
+      ["Fighting", "Dodge"],
+    );
+    assert.equal(c.skills["Climb"], 40);
+  });
+
+  // Bulleted label words are list items in bled-in appendix prose, not this
+  // block's section headings, so they must not populate the section.
+  test("a bulleted label in trailing prose is not a section heading", () => {
+    const [c] = parseCocCharacters(
+      "Clerk, ordinary STR 50 CON 50 SIZ 50 DEX 50 INT 60 APP 50 POW 50 EDU 70 SAN 50 HP 10 " +
+        "DB: 0 Build: 0 Move: 8 MP: 10 Combat Fighting (Brawl) 25% (12/5), damage 1D3 Dodge 25% (12/5) " +
+        "Skills Accounting 60% Spot Hidden 45% " +
+        "Later in the scenario an appendix reads: • Spells: Flesh Ward (variant), Mindblast (variant)",
+    );
+    assert.deepEqual(c.spells, []);
+    assert.equal(c.skills["Accounting"], 60);
+  });
 });

@@ -802,9 +802,35 @@ function maskParens(s: string): string {
   return s.replace(/\([^)]*\)/g, (m) => " ".repeat(m.length));
 }
 
-// A case-insensitive whole-word matcher for a literal label ("Skills", "Combat").
+// A case-insensitive whole-word (global) matcher for a literal label.
 function labelRe(label: string): RegExp {
-  return new RegExp(String.raw`\b${escapeRe(label)}\b`, "i");
+  return new RegExp(String.raw`\b${escapeRe(label)}\b`, "gi");
+}
+
+// A label occurrence is a section *heading* only when it isn't written in all
+// lowercase. Headings in these books are capitalised ("Skills", "Sanity loss",
+// "SPECIAL POWERS"); ordinary prose is lowercase ("its special power", "ignores
+// any armor", "engage in combat"). Matching labels case-insensitively then
+// dropping the all-lowercase hits keeps real headings while no longer letting a
+// prose word truncate a section before its stat lines are reached.
+function isHeadingCase(matched: string): boolean {
+  return /[A-Z]/.test(matched);
+}
+
+// Index of the first heading-like occurrence of `label` at or after `min`, or
+// -1 when there is none. A match counts only when it is heading-cased and not a
+// bulleted list item: appendix prose that bleeds into a block ("• Spells: Flesh
+// Ward (variant), ...") repeats real label words as bullet entries, which are
+// list items, not this stat block's section headings.
+function findLabel(masked: string, label: string, min = 0): number {
+  const re = labelRe(label);
+  for (let m = re.exec(masked); m; m = re.exec(masked)) {
+    if (m.index < min || !isHeadingCase(m[0])) continue;
+    const before = masked.slice(Math.max(0, m.index - 3), m.index);
+    if (/[•·]\s*$/.test(before)) continue;
+    return m.index;
+  }
+  return -1;
 }
 
 // Index of the earliest section label in `masked` (a paren-masked string), or
@@ -814,8 +840,8 @@ function nextSectionLabel(masked: string, exclude = "", min = 0): number {
   let end = masked.length;
   for (const label of SECTION_LABELS) {
     if (label.toLowerCase() === exclude.toLowerCase()) continue;
-    const idx = masked.search(labelRe(label));
-    if (idx >= min && idx < end) end = idx;
+    const idx = findLabel(masked, label, min);
+    if (idx >= 0 && idx < end) end = idx;
   }
   return end;
 }
@@ -1155,10 +1181,10 @@ function groupNameFromPrefix(prefix: string): string {
 // Text of a labelled section, from the label to the next section label.
 function sectionBody(body: string, label: string): string {
   const maskedBody = maskParens(body);
-  const startMatch = labelRe(label).exec(maskedBody);
-  if (!startMatch || startMatch.index === undefined) return "";
+  const startIdx = findLabel(maskedBody, label);
+  if (startIdx < 0) return "";
 
-  const start = startMatch.index + startMatch[0].length;
+  const start = startIdx + label.length;
   const rest = body.slice(start);
   const end = nextSectionLabel(maskParens(rest), label);
   return clean(rest.slice(0, end));

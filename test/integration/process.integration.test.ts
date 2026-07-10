@@ -120,6 +120,13 @@ describe("Dead Light", () => {
     assert.equal(c.age, null);
     assert.equal(c.characteristics.STR!.value, 70);
     assert.match(c.sanityLoss ?? "", /Dead Light/);
+    // Its attack lines follow a long prose paragraph containing lowercase label
+    // words ("mesmeric effect", "ignores armor"); they must still be captured.
+    const names = c.combat.map((a) => a.name);
+    assert.ok(
+      names.some((n) => /Tendril Lash/.test(n)),
+      `Tendril Lash captured (got ${names})`,
+    );
   });
 
   test("Billy Esterhouse — marked SAN and insanity note", () => {
