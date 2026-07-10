@@ -564,6 +564,19 @@ describe("parseCocCharacters (unit)", () => {
     assert.equal(c.combat.find((a) => a.name === "Fighting")!.damage, "7D6");
   });
 
+  // A footnote marker between a skill name and its value ("Divination* 55%")
+  // must not block the skill from being captured.
+  test("a skill with a footnote marker before its value is captured", () => {
+    const [c] = parseCocCharacters(
+      "Psychic, gifted STR 50 CON 50 SIZ 50 DEX 50 INT 70 APP 50 POW 80 EDU 60 SAN 40 HP 10 " +
+        "DB: 0 Build: 0 Move: 8 MP: 16 " +
+        "Skills Clairvoyance and Divination* 55% Cthulhu Mythos 5% First Aid 70%",
+    );
+    assert.equal(c.skills["Clairvoyance and Divination"], 55);
+    assert.equal(c.skills["Cthulhu Mythos"], 5);
+    assert.equal(c.skills["First Aid"], 70);
+  });
+
   // A skill whose value abuts the name with no space ("Art/Craft (Photography)35%")
   // must still be captured.
   test("a skill with no space before its value is captured", () => {
