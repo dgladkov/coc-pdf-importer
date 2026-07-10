@@ -1446,12 +1446,14 @@ function parseCombat(text: string): CombatEntry[] {
 
   // An attack is either:
   //  - "NN% (half/fifth)" with optional ", damage X" or ", <maneuver note>",
-  //  - "NN%, damage X" with the (half/fifth) omitted, or
+  //  - "NN%, damage X" with the (half/fifth) omitted,
   //  - a bare "damage X" maneuver with no percentage (damage must start with a
   //    dice/number so effect prose like "Latch damage each round" is not read
-  //    as an attack).
+  //    as an attack), or
+  //  - an auto-hit attack, which reads "automatic" where a skill % would sit and
+  //    may carry a non-dice damage ("Energy Blast automatic, damage, 20 points").
   const re = new RegExp(
-    String.raw`(${attackName})\s+(?:(\d{1,3})\s*%?\s*,?\s*(?:\(\s*(\d{1,3})\s*\/\s*(\d{1,3})\s*\)(?:\s*,?\s*damage\s+${damage}|\s*,\s*${maneuverNote})?|damage\s+${damage})|damage\s+(?=\d)${damage})`,
+    String.raw`(${attackName})\s+(?:(\d{1,3})\s*%?\s*,?\s*(?:\(\s*(\d{1,3})\s*\/\s*(\d{1,3})\s*\)(?:\s*,?\s*damage\s+${damage}|\s*,\s*${maneuverNote})?|damage\s+${damage})|damage\s+(?=\d)${damage}|[Aa]utomatic\b\s*,?\s*damage[,]?\s+${damage})`,
     "g",
   );
 
@@ -1465,15 +1467,18 @@ function parseCombat(text: string): CombatEntry[] {
       half = Math.floor(value / 2);
       fifth = Math.floor(value / 5);
     }
-    const { damage, note } = splitDamageNote(match[5] ?? match[7] ?? match[8]);
+    const { damage, note } = splitDamageNote(
+      match[5] ?? match[7] ?? match[8] ?? match[9],
+    );
     const maneuver = match[6] ? clean(match[6]) : null;
+    const auto = match[9] !== undefined ? "automatic" : null;
     out.push({
       name: cleanCombatName(match[1]),
       value,
       half,
       fifth,
       damage,
-      note: note ?? maneuver,
+      note: note ?? maneuver ?? auto,
     });
   }
   return out.flatMap(splitWeaponAlternatives);

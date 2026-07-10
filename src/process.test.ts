@@ -564,6 +564,24 @@ describe("parseCocCharacters (unit)", () => {
     assert.equal(c.combat.find((a) => a.name === "Fighting")!.damage, "7D6");
   });
 
+  // An auto-hit attack reads "automatic" where a skill % would sit and may carry
+  // a non-dice damage ("Energy Blast automatic, damage, 20 points").
+  test("an auto-hit attack with a non-dice damage is captured", () => {
+    const [c] = parseCocCharacters(
+      "Pharaoh, dark STR 200 CON 140 SIZ 250 DEX 50 INT 100 APP — POW 70 EDU — SAN — HP 39 " +
+        "DB: +5D6 Build: 6 Move: 7 MP: 75 " +
+        "Attacks per round: 1 Energy Blast Automatic, damage, 20 points Dodge 30% (15/6)",
+    );
+    assert.deepEqual(
+      c.combat.map((a) => a.name),
+      ["Energy Blast", "Dodge"],
+    );
+    const blast = c.combat.find((a) => a.name === "Energy Blast")!;
+    assert.equal(blast.value, null); // auto-hit, no skill roll
+    assert.equal(blast.damage, "20 points");
+    assert.equal(blast.note, "automatic");
+  });
+
   // A prose "... 1 point of Sanity loss ..." note among the attack description
   // must not end the combat section before the real attack profiles.
   test('an inline "Sanity loss" mention does not truncate combat', () => {
