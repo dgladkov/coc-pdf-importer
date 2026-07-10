@@ -564,6 +564,19 @@ describe("parseCocCharacters (unit)", () => {
     assert.equal(c.combat.find((a) => a.name === "Fighting")!.damage, "7D6");
   });
 
+  // A skill whose "%" is dropped but which keeps its "(half/fifth)" pair
+  // ("Navigate 10 (5/2)") is still one skill, and does not swallow the next.
+  test("a skill missing its % but with a (half/fifth) is captured", () => {
+    const [c] = parseCocCharacters(
+      "Noble, idle STR 50 CON 40 SIZ 60 DEX 60 INT 50 APP 50 POW 70 EDU 80 SAN 70 HP 10 " +
+        "DB: 0 Build: 0 Move: 7 MP: 14 " +
+        "Skills Navigate 10 (5/2) Occult 60% (30/12) Ride 50% (25/10)",
+    );
+    assert.equal(c.skills["Navigate"], 10);
+    assert.equal(c.skills["Occult"], 60);
+    assert.equal(c.skills["Ride"], 50);
+  });
+
   // A footnote marker between a skill name and its value ("Divination* 55%")
   // must not block the skill from being captured.
   test("a skill with a footnote marker before its value is captured", () => {

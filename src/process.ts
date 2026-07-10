@@ -1693,8 +1693,11 @@ function parseKeyedList(text: string): Skills {
   // The gap before the value may be absent ("Art/Craft (Photography)35%"), so the
   // separator is optional; skill/language names never end in a digit, so this
   // can't split a name. A footnote marker may sit between the name and the value
-  // ("Clairvoyance and Divination* 55%") and must not block the match.
-  const entryRe = /([A-Za-z][A-Za-z0-9 .()/'&:-]*?)\s*[*✝‡†●]?\s*(\d{1,3})\s*%/g;
+  // ("Clairvoyance and Divination* 55%") and must not block the match. The value
+  // is a number followed by "%" or — when the "%" is dropped ("Navigate 10 (5/2)")
+  // — by a "(half/fifth)" pair.
+  const entryRe =
+    /([A-Za-z][A-Za-z0-9 .()/'&:-]*?)\s*[*✝‡†●]?\s*(\d{1,3})\s*(?:%|(?=\s*\(\s*\d+\s*\/\s*\d+\s*\)))/g;
   for (const match of text.matchAll(entryRe)) {
     const name = cleanEntryName(match[1]);
     if (name) out[name] = Number(match[2]);
