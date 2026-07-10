@@ -564,6 +564,19 @@ describe("parseCocCharacters (unit)", () => {
     assert.equal(c.combat.find((a) => a.name === "Fighting")!.damage, "7D6");
   });
 
+  // A skill whose value abuts the name with no space ("Art/Craft (Photography)35%")
+  // must still be captured.
+  test("a skill with no space before its value is captured", () => {
+    const [c] = parseCocCharacters(
+      "Detective, sharp STR 70 CON 50 SIZ 65 DEX 80 INT 80 APP 35 POW 50 EDU 60 SAN 50 HP 11 " +
+        "DB: +1D4 Build: 1 Move: 8 MP: 10 " +
+        "Skills Art/Craft (Photography)35% Climb 30% Drive Auto10%",
+    );
+    assert.equal(c.skills["Art/Craft (Photography)"], 35);
+    assert.equal(c.skills["Climb"], 30);
+    assert.equal(c.skills["Drive Auto"], 10);
+  });
+
   // A parenthetical with an abbreviating period ("(inc. Driver Ant Column)")
   // must not end the comma-separated spell list early.
   test("a spell list is not truncated by a period inside a parenthetical", () => {

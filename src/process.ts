@@ -1684,7 +1684,10 @@ function parseKeyedList(text: string): Skills {
 
   const out: Skills = {};
   // ":" is allowed so a nested specialisation survives ("Lore (Theology: Methodism)").
-  const entryRe = /([A-Za-z][A-Za-z0-9 .()/'&:-]*?)\s+(\d{1,3})\s*%/g;
+  // The gap before the value may be absent ("Art/Craft (Photography)35%"), so the
+  // separator is optional; skill/language names never end in a digit, so this
+  // can't split a name.
+  const entryRe = /([A-Za-z][A-Za-z0-9 .()/'&:-]*?)\s*(\d{1,3})\s*%/g;
   for (const match of text.matchAll(entryRe)) {
     const name = cleanEntryName(match[1]);
     if (name) out[name] = Number(match[2]);
