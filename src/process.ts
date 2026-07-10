@@ -1301,6 +1301,12 @@ function combatSection(body: string): string {
 function parseSpells(text: string): string[] {
   if (!text) return [];
 
+  // A "... Suggested spells:" (or "known spells:") preamble introduces the real
+  // list; drop everything up to and including it so the comma-separated names
+  // that follow are parsed rather than the preamble label itself.
+  text = text.replace(/^.*\bspells\s*:\s*/is, "");
+  if (!text) return [];
+
   const colon = text.indexOf(":");
   const comma = text.indexOf(",");
   const descriptive = colon >= 0 && (comma < 0 || colon < comma);

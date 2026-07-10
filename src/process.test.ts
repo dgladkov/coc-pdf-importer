@@ -590,6 +590,22 @@ describe("parseCocCharacters (unit)", () => {
     assert.equal(c.skills["Drive Auto"], 10);
   });
 
+  // A "Suggested spells:" preamble introduces the real comma-separated list; the
+  // preamble label must not be captured as a spell.
+  test('a "Suggested spells:" preamble is dropped, not read as a spell', () => {
+    const [c] = parseCocCharacters(
+      "Sorcerer, dark STR 50 CON 50 SIZ 50 DEX 50 INT 80 APP 50 POW 90 EDU 80 SAN 20 HP 10 " +
+        "DB: 0 Build: 0 Move: 8 MP: 18 " +
+        "Spells: any spells as the Keeper wishes. Suggested spells: " +
+        "Breath of the Deep, Contact Cthulhu, Wither Limb. See Appendix B.",
+    );
+    assert.deepEqual(c.spells, [
+      "Breath of the Deep",
+      "Contact Cthulhu",
+      "Wither Limb",
+    ]);
+  });
+
   // A parenthetical with an abbreviating period ("(inc. Driver Ant Column)")
   // must not end the comma-separated spell list early.
   test("a spell list is not truncated by a period inside a parenthetical", () => {
