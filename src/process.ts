@@ -109,7 +109,7 @@ export function parseCocCharacters(
   // (optionally marked with *), or a lone "-" (an em/en dash for N/A stats),
   // each optionally followed by a "(3D6 x 5)"-style roll formula and/or an
   // "Average Rolls" multiplier printed after the formula ("45 (1D6+6) ×5").
-  const value = String.raw`(?:\d{1,3}\*?|-)(?:\s*\([^)]*\))?(?:\s*[×xX]\s*\d+)?`;
+  const value = String.raw`(?:\d{1,3}\*?|-|[Nn]/[Aa])(?:\s*\([^)]*\))?(?:\s*[×xX]\s*\d+)?`;
   const anchorRe = new RegExp(
     String.raw`\bSTR\s+${value}(?:\s+${value})*\s+CON\b`,
     "g",
@@ -865,6 +865,10 @@ function tokenizeStatHeader(header: string): Map<string, string[]> {
   // Drop any remaining "(3D6 x 5)"-style roll formulas so they don't look like
   // extra columns.
   header = header.replace(/\([^)]*\)/g, " ");
+  // "average / rolls" blocks mark unavailable characteristics as "n/a" in both
+  // the roll and average columns ("STR n/a n/a CON ..."); drop them so they
+  // neither count as extra group columns nor become bogus values.
+  header = header.replace(/\bn\/a\b/gi, " ");
 
   let current: string | null = null;
   for (const token of header.split(/\s+/).filter(Boolean)) {
@@ -899,10 +903,19 @@ function canonicalLabel(label: string): string {
 }
 
 function colCount(cols: Map<string, string[]>): number {
-  let n = 1;
+  // Tally how many characteristics carry each value-count. A genuine group table
+  // prints the same number of values for every characteristic (one per member),
+  // so a column count must be supported by at least two characteristics. A lone
+  // larger count is a stray value picked up from prose (e.g. a "Keeper note: ...
+  // INT 90" footnote after the stat line), not an extra column.
+  const counts = new Map<number, number>();
   for (const label of CHAR_LABELS) {
-    const values = cols.get(label);
-    if (values && values.length > n) n = values.length;
+    const len = cols.get(label)?.length ?? 0;
+    if (len > 0) counts.set(len, (counts.get(len) ?? 0) + 1);
+  }
+  let n = 1;
+  for (const [len, chars] of counts) {
+    if (len > n && chars >= 2) n = len;
   }
   return n;
 }

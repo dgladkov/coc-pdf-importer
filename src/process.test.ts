@@ -515,6 +515,36 @@ describe("parseCocCharacters (unit)", () => {
     assert.equal(c.skills["Climb"], 40);
   });
 
+  // "average / rolls" monster blocks mark inapplicable characteristics "n/a" in
+  // both columns; the block must still be recognised and stay a single creature.
+  test('an "average / rolls" block with n/a characteristics is recognised', () => {
+    const cs = parseCocCharacters(
+      "Wraith, formless STR n/a n/a CON n/a n/a SIZ (6D6+9)×5 150 " +
+        "DEX (4D6+6)×5 100 INT (2D6+3)×5 50 POW (8D6+12)×5 200 " +
+        "Average Magic Points: 50 Move: 12",
+    );
+    assert.equal(cs.length, 1);
+    const [c] = cs;
+    assert.equal(c.characteristics.STR, undefined); // n/a -> not invented
+    assert.equal(c.characteristics.CON, undefined);
+    assert.equal(c.characteristics.SIZ!.value, 150);
+    assert.equal(c.characteristics.INT!.value, 50);
+    assert.equal(c.derived.MP, 50);
+    assert.equal(c.derived.Move, 12);
+  });
+
+  // A stray characteristic value in trailing prose ("... has INT 90 after
+  // feeding") must not be read as a second group column.
+  test("a lone extra characteristic value does not create a group column", () => {
+    const cs = parseCocCharacters(
+      "Beast, x STR 80 CON 80 SIZ 80 DEX 50 INT 40 APP 40 POW 50 EDU 40 SAN 40 HP 16 " +
+        "DB: +1D6 Build: 2 Move: 8 MP: 10 Note: it has INT 90 after feeding. " +
+        "Combat Fighting 50% (25/10), damage 1D6",
+    );
+    assert.equal(cs.length, 1); // one creature, not two
+    assert.equal(cs[0].characteristics.INT!.value, 40);
+  });
+
   // Bulleted label words are list items in bled-in appendix prose, not this
   // block's section headings, so they must not populate the section.
   test("a bulleted label in trailing prose is not a section heading", () => {
