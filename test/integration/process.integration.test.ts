@@ -320,6 +320,27 @@ describe("Masks of Nyarlathotep", () => {
       'a group fell back to "NPC N"',
     );
   });
+
+  test("a following group does not inherit the previous NPC's sections", () => {
+    // Lin Yenyu's Spell list sits immediately before the "NEFARIOUS HIRELINGS OF
+    // LIN YENYU" group table, and the group's name heuristic reaches back into
+    // it. The block boundary is the group's section-title heading, so her spells
+    // stay hers and the hirelings neither inherit them nor lose their own skills.
+    const lin = byName(chars, "Lin Yenyu");
+    assert.ok(lin.spells.length > 0, "Lin Yenyu keeps her own spells");
+    const hirelings = chars.filter((c) =>
+      /^Nefarious Hirelings of Lin Yenyu \d/.test(c.name),
+    );
+    assert.equal(hirelings.length, 8);
+    assert.ok(
+      hirelings.every((h) => h.spells.length === 0),
+      "a hireling inherited Lin Yenyu's spells",
+    );
+    assert.ok(
+      hirelings.every((h) => Object.keys(h.skills).length > 3),
+      "a hireling lost its own skill list",
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------

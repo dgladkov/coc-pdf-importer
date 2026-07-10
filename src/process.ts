@@ -166,15 +166,23 @@ export function parseCocCharacters(
     let bodyEnd = text.length;
     if (i + 1 < headers.length) {
       const next = headers[i + 1];
-      bodyEnd = next.headerStart;
-      if (next.headingStart > strIndex && next.headingStart < bodyEnd)
-        bodyEnd = next.headingStart;
+      // End at the next block's section-title heading when it has one. The title
+      // reliably delimits the next block even when that block's name heuristic
+      // reached back past the title into this block (so its headerStart is not
+      // trustworthy); otherwise end at the next name line.
+      bodyEnd = next.headingStart > strIndex ? next.headingStart : next.headerStart;
     }
     const body = text.slice(strIndex, bodyEnd);
     const { name, age, description } = headers[i].header;
-    // Text between this block's heading and its STR anchor. Some group tables
-    // print the shared Combat/Skills sections here, ahead of the stat table.
-    const preTable = text.slice(headers[i].headerStart, strIndex);
+    // Text between this block's start and its STR anchor. Some group tables print
+    // the shared Combat/Skills sections here, ahead of the stat table. Start at
+    // the section-title heading when the name heuristic reached back past it into
+    // the previous block (headingStart > headerStart); otherwise at the name.
+    const blockStart =
+      headers[i].headingStart > headers[i].headerStart
+        ? headers[i].headingStart
+        : headers[i].headerStart;
+    const preTable = text.slice(blockStart, strIndex);
 
     characters.push(
       ...parseBlock(
