@@ -546,6 +546,26 @@ describe("parseCocCharacters (unit)", () => {
     assert.equal(cs[0].characteristics.INT!.value, 40);
   });
 
+  // A descriptive "Attacks per round" count (dice and/or prose, "1D8 bites per
+  // target", "1 per two rounds (energy blast)") is captured in full, bounded at
+  // the first attack name.
+  test("a descriptive Attacks per round count is captured in full", () => {
+    const [a] = parseCocCharacters(
+      "Beast, x STR 80 CON 80 SIZ 80 DEX 50 INT 40 APP 40 POW 50 EDU 40 SAN 40 HP 16 " +
+        "DB: +1D6 Build: 2 Move: 8 MP: 10 " +
+        "Combat Attacks per round: 1D8 bites per target " +
+        "Fighting 60% (30/12), damage 1D6 Dodge 30% (15/6)",
+    );
+    assert.equal(a.attacksPerRound, "1D8 bites per target");
+    const [b] = parseCocCharacters(
+      "Avatar, dark STR 200 CON 140 SIZ 250 DEX 50 INT 100 APP — POW 70 EDU — SAN — HP 39 " +
+        "DB: +5D6 Build: 6 Move: 7 MP: 75 " +
+        "Combat Attacks per round: 1 per two rounds (energy blast) " +
+        "Energy Blast Automatic, damage, 20 points Dodge 30% (15/6)",
+    );
+    assert.equal(b.attacksPerRound, "1 per two rounds (energy blast)");
+  });
+
   // A block with two "Combat" headings (one over the attack prose, one over the
   // stat lines) leaves a heading word before the first attack; it must not be
   // read as part of the attack name ("Combat Fighting" -> "Fighting").

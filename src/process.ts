@@ -1385,14 +1385,24 @@ function nameFromSanityLoss(sanityLoss: string | null): string | null {
   return name[0].toUpperCase() + name.slice(1);
 }
 
-// The "Attacks per round" value from a Combat section, e.g. "1" or
-// "up to 4 (1D4 tendril lash or 1 consume)". Returns null when absent.
+// The "Attacks per round" value from a Combat section, e.g. "1",
+// "up to 4 (1D4 tendril lash or 1 consume)", or a dice/prose count like
+// "1D8 bites per target" / "1 per two rounds (energy blast)". The count is a
+// number or dice, followed by a descriptive tail of lowercase words and
+// parentheticals that runs up to the first attack name (a capitalised word).
+// Returns null when absent.
 function parseAttacksPerRound(combatText: string): string | null {
-  const match =
-    /Attacks per round\s*:?\s*((?:up to\s+)?\d+(?:\s*\([^)]*\))?)/i.exec(
-      combatText,
+  const head = /Attacks per round\s*:?\s*/i.exec(combatText);
+  if (!head) return null;
+  const rest = combatText.slice(head.index + head[0].length);
+  // Case-sensitive (no /i): the "(?![A-Z])" that bounds the tail at the first
+  // attack name must reject only *upper*-case letters — under /i it would fold
+  // to reject all letters and drop the whole descriptive tail.
+  const m =
+    /^(?:up to\s+)?\d+(?:[dD]\d+)?(?:\s*\([^)]*\)|\s+(?![A-Z])[^\s(]+)*/.exec(
+      rest,
     );
-  return match ? clean(match[1]) : null;
+  return m ? clean(m[0]) : null;
 }
 
 function parseCombat(text: string): CombatEntry[] {
