@@ -546,6 +546,27 @@ describe("parseCocCharacters (unit)", () => {
     assert.equal(cs[0].characteristics.INT!.value, 40);
   });
 
+  // A block with two "Combat" headings (one over the attack prose, one over the
+  // stat lines) leaves a heading word before the first attack; it must not be
+  // read as part of the attack name ("Combat Fighting" -> "Fighting").
+  test('a second "Combat" heading is not glued onto the attack name', () => {
+    const [c] = parseCocCharacters(
+      "Undead, foul STR 100 CON 90 SIZ 65 DEX 75 INT 30 APP 50 POW 50 EDU 20 SAN 40 HP 15 " +
+        "DB: +1D6 Build: 2 Move: 7 MP: 10 " +
+        "Combat Attacks per round: 1 (grab) " +
+        "Grab (mnvr): holds and pins the victim, ready to suck the life out. " +
+        "Combat Fighting 60% (30/12), damage 1D6 Dodge 35% (17/7)",
+    );
+    assert.ok(
+      c.combat.some((a) => a.name === "Fighting"),
+      "Fighting captured without a Combat prefix",
+    );
+    assert.ok(
+      !c.combat.some((a) => /\bCombat\b/.test(a.name)),
+      "an attack name still includes Combat",
+    );
+  });
+
   // An inline "Special: ..." note among the attack prose must not end the combat
   // section before the real attack profiles that follow it.
   test('an inline "Special:" note does not truncate combat', () => {

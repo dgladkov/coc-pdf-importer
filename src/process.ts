@@ -1432,7 +1432,11 @@ function parseCombat(text: string): CombatEntry[] {
   // effect clause up to the next "%" ("... failed) Hatchet (thrown) 40%"),
   // truncating the current attack's damage; a comma-laden "(...)" would absorb a
   // description ("(lashing out..., kicking..., or goring...) Fighting 40%").
-  const attackName = String.raw`${honorific}(?!\d+[dD]\d+\b)(?!DB\b)\.?[A-Z0-9](?:[A-Za-z0-9 /'"+#*-]|\([^),]*\)|\.\d)*?`;
+  // Not "Combat": a block may carry two "Combat" headings (one over the attack
+  // prose, one over the stat lines), leaving a heading word glued before the
+  // first attack ("... hideous scar. Combat Fighting 60% ..."); no attack is
+  // named "Combat", so never start a name there.
+  const attackName = String.raw`${honorific}(?!\d+[dD]\d+\b)(?!DB\b)(?!Combat\b)\.?[A-Z0-9](?:[A-Za-z0-9 /'"+#*-]|\([^),]*\)|\.\d)*?`;
   // The start of the next attack, used only to bound the damage of this one. An
   // attack profile is a value followed by a "(half/fifth)" or ", damage". The %
   // is optional (some Dodges read "Dodge 27 (13/5)") and a comma may sit before
