@@ -315,11 +315,12 @@ describe("parseCocCharacters (unit)", () => {
         "Languages Varies, assume Arabic 35%, English 35%, various Mythos languages 40%.",
     );
     // Leading "(human)" qualifier dropped; a nested ":" specialisation is kept
-    // whole ("Lore (Theology: Methodism)"); compact "(Biology 70%, ...)" ->
-    // "Sciences" (no unclosed paren); a balanced "Science (Physics)" stays intact.
+    // whole ("Lore (Theology: Methodism)"); compact "Sciences (Biology 70%, ...)"
+    // expands per specialisation; a balanced "Science (Physics)" stays intact.
     assert.equal(c.skills["Climb"], 40);
     assert.equal(c.skills["Lore (Theology: Methodism)"], 60);
-    assert.equal(c.skills["Sciences"], 70);
+    assert.equal(c.skills["Science (Biology)"], 70);
+    assert.equal(c.skills["Science (Chemistry)"], 90);
     assert.equal(c.skills["Science (Physics)"], 25);
     assert.equal(c.skills["Spot Hidden"], 45);
     // Prose prefix "Varies, assume" dropped, leaving the bare language names.
@@ -562,6 +563,22 @@ describe("parseCocCharacters (unit)", () => {
       ["Fighting", "Exploding pustule", "Dodge"],
     );
     assert.equal(c.combat.find((a) => a.name === "Fighting")!.damage, "7D6");
+  });
+
+  // A "Sciences (Biology 70%, Chemistry 90%)" umbrella lists several
+  // specialisations with the value inside the parenthetical; each becomes its
+  // own "Science (Spec)" skill.
+  test('"Sciences (Biology 70%, Chemistry 90%)" expands per specialisation', () => {
+    const [c] = parseCocCharacters(
+      "Scholar, learned STR 50 CON 50 SIZ 50 DEX 50 INT 80 APP 50 POW 60 EDU 90 SAN 50 HP 10 " +
+        "DB: 0 Build: 0 Move: 8 MP: 12 " +
+        "Skills Listen 40% Sciences (Biology 70%, Chemistry 90%) Spot Hidden 45%",
+    );
+    assert.equal(c.skills["Science (Biology)"], 70);
+    assert.equal(c.skills["Science (Chemistry)"], 90);
+    assert.equal(c.skills["Sciences"], undefined); // umbrella not kept as a skill
+    assert.equal(c.skills["Listen"], 40);
+    assert.equal(c.skills["Spot Hidden"], 45);
   });
 
   // A skill whose "%" is dropped but which keeps its "(half/fifth)" pair

@@ -1683,6 +1683,22 @@ function parseKeyedList(text: string): Skills {
   // language names with no per-entry %) -> just the names, which yield nothing.
   text = text.replace(/^\s*\([^)]*\)\s*/, "");
 
+  // A "Sciences (Biology 70%, Chemistry 90%)" entry lists several specialisations
+  // with the value *inside* the parenthetical; expand it to one
+  // "Science (Spec) NN%" per spec so each keeps its own name and value (matching
+  // the "Science (Biology) 70%" form seen elsewhere).
+  text = text.replace(/\bSciences?\s*\(([^)]*)\)/g, (whole, inner) => {
+    if (!/\d\s*%/.test(inner)) return whole; // "(Biology)" alone is a normal spec
+    const specs = inner
+      .split(",")
+      .map((part: string) => {
+        const m = /^\s*([A-Za-z][A-Za-z ]*?)\s*(\d{1,3})\s*%/.exec(part);
+        return m ? `Science (${m[1].trim()}) ${m[2]}%` : "";
+      })
+      .filter(Boolean);
+    return specs.length ? specs.join(", ") : whole;
+  });
+
   const listEnd = text.search(/\d{1,3}\s*%\s*\./);
   if (listEnd >= 0) {
     text = text.slice(0, text.indexOf("%", listEnd) + 1);
