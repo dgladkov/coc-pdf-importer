@@ -731,6 +731,28 @@ describe("parseCocCharacters (unit)", () => {
     assert.match(c.sanityLoss ?? "", /1D6\/1D20/);
   });
 
+  // A creature with two forms lists a qualified "Skills (human)" / "Skills (Beast
+  // Form)" per form after the last form's stats; each form gets its own, and the
+  // base form also inherits the shared Languages/Sanity.
+  test("a two-form creature routes qualified skills to each form", () => {
+    const cs = parseCocCharacters(
+      "Shifter, were-thing Human Form STR 60 CON 70 SIZ 55 DEX 95 INT 80 APP 90 POW 90 EDU 90 SAN 45 HP 12 " +
+        "DB: 0 Build: 0 Move: 9 MP: 18 Combat Attacks per round (human): 2 Brawl 70% (35/14), damage 1D4 Dodge 45% (22/9) " +
+        "Beast Form STR 90 CON 75 SIZ 90 DEX 120 INT 80 APP — POW 95 EDU — SAN — HP 16 " +
+        "DB: +1D6 Build: 2 Move: 12 MP: 19 Combat Attacks per round: 2 Fighting 50% (25/10), damage 1D6 Dodge 60% (30/12) " +
+        "Skills (human) Climb 75%, Stealth 75%. Skills (Beast Form) Climb 95%, Stealth 100%. " +
+        "Languages English 35%. Sanity loss: 0/1D6 Sanity points to see it change.",
+    );
+    assert.equal(cs.length, 2);
+    const [base, beast] = cs;
+    assert.equal(base.skills["Climb"], 75); // human form's own skills
+    assert.equal(base.skills["Stealth"], 75);
+    assert.equal(base.languages["English"], 35); // shared section inherited
+    assert.match(base.sanityLoss ?? "", /0\/1D6/); // shared section inherited
+    assert.equal(beast.skills["Climb"], 95); // beast form's own skills
+    assert.equal(beast.skills["Stealth"], 100);
+  });
+
   // A set of separate single-column stat lines (e.g. paired NPCs or a creature's
   // two forms) shares one Combat/Skills section printed after the last line; a
   // "bare" earlier line inherits it instead of coming out empty.

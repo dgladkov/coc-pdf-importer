@@ -184,6 +184,7 @@ export function parseCocCharacters(
   const characters: CocCharacter[] = [];
 
   blocks.forEach((block, i) => {
+    const { name, age, description } = headers[i].header;
     // A "bare" stat line carries only characteristics — no Combat/Skills/Sanity
     // of its own. Such lines belong to a set (e.g. "Mr. Smith" then "Mrs. Smith",
     // or a creature's two forms) whose shared section is printed after the last
@@ -196,8 +197,12 @@ export function parseCocCharacters(
           break;
         }
       }
+    } else if (i + 1 < blocks.length && /\bForm$/i.test(headers[i + 1].header.name)) {
+      // A base form ("Neris") followed by a "... Form" continuation ("Panther
+      // Form") keeps its own combat but shares the Skills/Languages/Spells/Sanity
+      // printed after the last form, so inherit them from that block's body.
+      sharedTail = blocks[i + 1].body;
     }
-    const { name, age, description } = headers[i].header;
     characters.push(
       ...parseBlock(
         block.body,
@@ -208,6 +213,7 @@ export function parseCocCharacters(
         headers[i].sectionHeading,
         block.preTable,
         sharedTail,
+        blockForm(name, block.body),
       ),
     );
   });
@@ -692,6 +698,7 @@ function parseBlock(
   sectionHeading = "",
   preTable = "",
   sharedTail = "",
+  form = "",
 ): CocCharacter[] {
   // Rewrite spelled-out derived labels here (done per block so global text
   // offsets used for name detection stay stable).
@@ -726,9 +733,9 @@ function parseBlock(
   if (numCols <= 1 && !combat.length && !combatText)
     combat = parseCombat(statHeader);
   const skills = parseKeyedList(
-    sectionBody(body, "Skills") ||
-      sectionBody(fallback, "Skills") ||
-      sectionBody(sharedTail, "Skills"),
+    skillsSection(body, form) ||
+      skillsSection(fallback, form) ||
+      skillsSection(sharedTail, form),
   );
   const languages = parseKeyedList(
     sectionBody(body, "Languages") ||
@@ -1249,6 +1256,36 @@ function bodyHasSections(body: string): boolean {
     /Sanity\s+Loss\s*:/i.test(body) ||
     /Attacks?\s+per\s+round/i.test(body)
   );
+}
+
+// The form a stat block belongs to, for a multi-form creature: a "... Form" name
+// ("Panther Form" -> "panther") or a "(human)" qualifier on the Attacks-per-round
+// line of the base form. "" when the block is not part of a form set.
+function blockForm(name: string, body: string): string {
+  const named = /^(.*?)\s+Form$/i.exec(name);
+  if (named) return named[1].toLowerCase();
+  const qualified = /Attacks per round\s*\(([A-Za-z]+)\)/i.exec(body);
+  return qualified ? qualified[1].toLowerCase() : "";
+}
+
+// The Skills section for a block. A multi-form creature lists one qualified
+// "Skills (human)" / "Skills (Panther Form)" section per form (all after the last
+// form's stats); when `form` is set and several are present, pick the one whose
+// qualifier names this form. Otherwise the first "Skills" section, as usual.
+function skillsSection(source: string, form: string): string {
+  if (form) {
+    const masked = maskParens(source);
+    const re = labelRe("Skills");
+    for (let m = re.exec(masked); m; m = re.exec(masked)) {
+      if (!isHeadingCase(m[0])) continue;
+      const qual = /^\s*\(([^)]*)\)/.exec(source.slice(m.index + "Skills".length));
+      if (qual && new RegExp(String.raw`\b${escapeRe(form)}`, "i").test(qual[1])) {
+        const rest = source.slice(m.index + "Skills".length);
+        return clean(rest.slice(0, nextSectionLabel(maskParens(rest), "Skills")));
+      }
+    }
+  }
+  return sectionBody(source, "Skills");
 }
 
 function sectionBody(
