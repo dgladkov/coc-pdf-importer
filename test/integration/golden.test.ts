@@ -17,6 +17,7 @@ const FILES = [
   "CHA23148_-_Doors_to_Darkness_v1.1",
   "CHA23153_-_Masks_of_Nyarlathotep_-_Keeper_Reference_Booklet_v3",
   "CHA23159_-_Dead_Light_and_Other_Dark_Turns",
+  "CHA23172_-_Does_Love_Forgive_-_V5",
   "CHA23178-Book3-Scenarios-2026-download",
   "The Lightless Beacon - Call of Cthulhu",
 ];

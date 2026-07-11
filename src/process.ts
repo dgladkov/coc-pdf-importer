@@ -287,6 +287,17 @@ function headerFromChunks(
   // running header (e.g. "DARK TURNS"); otherwise defer to the fallbacks.
   if (chunks[i].height > nameHeight + 0.5) return null;
 
+  // A "..., age N, ..." name line in the body skipped between this heading and
+  // STR means the heading is a section title sitting above a body-height name
+  // line ("Unhappily Ever After" over "Hattie May (née James), age 26"); defer to
+  // the text parser, which reads that name line.
+  const skipped = chunks
+    .slice(i + 1, anchorIdx)
+    .map((c) => c.text)
+    .join(" ");
+  if (/\b(?:age|appears)\s+\d{1,3}\b|,\s*\d{1,3}\+?\s*,/i.test(skipped))
+    return null;
+
   // Collect the contiguous run at this heading height (name + descriptor, and
   // possibly a group title on an earlier line).
   const height = chunks[i].height;
@@ -650,11 +661,16 @@ function collectName(pre: string, allowCaps: boolean): string {
     ) {
       break;
     }
-    // A parenthetical member marker with no letters ("#1)" in "(Cultist #1)") is
-    // part of the name — keep it rather than stopping the walk. A purely numeric
-    // parenthetical ("(25/10)", a combat Hard/Extreme value) is not a name, so
-    // require the "#" marker and let anything else stop the walk.
-    if (/#/.test(token) && !token.replace(/[^A-Za-z]/g, "")) {
+    // A letter-less parenthetical marker is part of the name: a member marker
+    // ("#1)" in "(Cultist #1)") or a group-size count ("(2)" in "Japanese
+    // Bodyguards (2)"). A combat value ("(25/10)", a Hard/Extreme pair) carries a
+    // "/", so exclude those and let anything else stop the walk.
+    if (
+      !token.replace(/[^A-Za-z]/g, "") && // no letters
+      /[()#]/.test(token) && // a parenthetical/#-marker, not a bare number
+      /[#\d]/.test(token) &&
+      !token.includes("/") // not a combat "(25/10)" value
+    ) {
       collected.unshift(token);
       continue;
     }
@@ -1815,6 +1831,16 @@ function parseKeyedList(text: string): Skills {
 // ("Lore (Theology: Methodism)" -> "Methodism", "Sciences (Biology" -> "Sciences").
 function cleanEntryName(raw: string): string {
   let s = clean(raw);
+  // Rejoin a word split across a line break ("Per- suade" -> "Persuade", "Lan-
+  // guage" -> "Language") and drop a space just inside a parenthesis a line break
+  // left behind ("Language ( Japanese)" -> "Language (Japanese)").
+  s = s
+    .replace(/([A-Za-z])-\s+([A-Za-z])/g, "$1$2")
+    .replace(/\(\s+/g, "(")
+    .replace(/\s+\)/g, ")")
+    // Ad-hoc: "Throw" is line-broken without a hyphen ("Th row") in some sheets;
+    // a bare space split is not generally recoverable, but this one skill is.
+    .replace(/\bTh row\b/g, "Throw");
   const cap = s.search(/[A-Z]/);
   if (cap < 0) return ""; // no capitalised word — prose ("etc", "thus making up")
   if (cap > 0) s = s.slice(cap);
@@ -1846,6 +1872,7 @@ function normalizeText(text: string): string {
     .replace(/\u001f/g, "fi") // a "fi" ligature this font emits as U+001F ("Zombified")
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "") // strip stray C0 controls
     .replace(/ /g, " ")
+    .replace(/�/g, "") // drop replacement chars from PDF decoding failures
     .replace(/[‒–—―−]/g, "-") // en/em/minus dashes -> -
     .replace(/[“”]/g, '"')
     .replace(/[‘’]/g, "'")

@@ -667,6 +667,43 @@ describe("parseCocCharacters (unit)", () => {
     assert.equal(c.skills["Ride"], 50);
   });
 
+  // Line-break hyphenation ("Per- suade") and a space just inside a parenthesis
+  // ("( Japanese)") in a skill name are repaired.
+  test("skill names shed line-break hyphenation and paren spaces", () => {
+    const [c] = parseCocCharacters(
+      "Clerk, x STR 50 CON 50 SIZ 50 DEX 50 INT 60 APP 50 POW 50 EDU 70 SAN 50 HP 10 " +
+        "DB: 0 Build: 0 Move: 8 MP: 10 " +
+        "Skills Per- suade 40%, Language ( Japanese) 50%, Science (Lin- guistics) 30%, " +
+        "Th row 55%",
+    );
+    assert.equal(c.skills["Persuade"], 40);
+    assert.equal(c.skills["Language (Japanese)"], 50);
+    assert.equal(c.skills["Science (Linguistics)"], 30);
+    assert.equal(c.skills["Throw"], 55); // ad-hoc "Th row" -> "Throw"
+  });
+
+  // A U+FFFD replacement char from a PDF decoding failure is dropped ("Prof�
+  // Smith" -> "Prof Smith").
+  test("a replacement character is stripped from the text", () => {
+    const [c] = parseCocCharacters(
+      "Prof� Smith, age 40, scholar STR 50 CON 50 SIZ 50 DEX 50 INT 80 APP 50 " +
+        "POW 50 EDU 80 SAN 50 HP 10 DB: 0 Build: 0 Move: 8 MP: 10",
+    );
+    assert.ok(!/�/.test(c.name), "no replacement char in name");
+    assert.equal(c.name, "Prof Smith");
+  });
+
+  // A group-size marker "(2)" in a shared-profile name is kept, not treated as a
+  // non-name value that ends the name.
+  test('a "(N)" group-size marker is part of the name', () => {
+    const [c] = parseCocCharacters(
+      "Bodyguards (2) Use this profile for all of them. " +
+        "STR 60 CON 80 SIZ 65 DEX 55 INT 50 APP 50 POW 50 EDU 50 SAN 50 HP 14 " +
+        "DB: +1D4 Build: 1 Move: 8 MP: 10",
+    );
+    assert.equal(c.name, "Bodyguards (2)");
+  });
+
   // A footnote marker between a skill name and its value ("Divination* 55%")
   // must not block the skill from being captured.
   test("a skill with a footnote marker before its value is captured", () => {
