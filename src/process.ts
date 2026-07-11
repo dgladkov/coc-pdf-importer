@@ -85,6 +85,7 @@ export interface CocCharacter {
   languages: Skills;
   spells: string[];
   sanityLoss: string | null; // present for monsters, null for ordinary NPCs
+  armor: string | null; // e.g. "3-point fur and gristle", "none"; null when absent
   notes: string[];
 }
 
@@ -748,6 +749,7 @@ function parseBlock(
       sectionBody(sharedTail, "Spells"),
   );
   const sanityLoss = parseSanityLoss(body) || parseSanityLoss(sharedTail);
+  const armor = parseArmor(body) || parseArmor(sharedTail);
   const note = parseNoteBeforeCombat(body);
   const notes = note ? [note] : [];
 
@@ -773,6 +775,7 @@ function parseBlock(
         languages,
         spells,
         sanityLoss,
+        armor,
         notes,
       },
     ];
@@ -828,6 +831,7 @@ function parseBlock(
       languages,
       spells,
       sanityLoss,
+      armor,
       notes,
     });
   }
@@ -1403,6 +1407,38 @@ function parseSanityLoss(body: string): string | null {
     const space = value.lastIndexOf(" ", 120);
     value = value.slice(0, space > 0 ? space : 120);
   }
+  return value || null;
+}
+
+// The "Armor" statement (monsters), e.g. "3-point fur and gristle", "none", or a
+// prose immunity ("none, but impaling weapons do 1 point of damage"). Requires a
+// colon so prose mentions ("ignores any armor") don't match. Bounded at the next
+// section label, then the first sentence end. Returns null when absent.
+function parseArmor(body: string): string | null {
+  const match = /\bArmor\s*:\s*/i.exec(maskParens(body));
+  if (!match) return null;
+
+  const rest = body.slice(match.index + match[0].length);
+  // Search on the paren-masked text so a sentence end is only taken *outside* a
+  // parenthetical — an abbreviation period ("(e.g. if ...)") must not cut it.
+  const masked = maskParens(rest);
+  let end = nextSectionLabel(masked, "Armor");
+  const cut = masked.slice(0, end).search(/\.(?:\s|$)|[•●⁃|]/);
+  if (cut >= 0) end = cut;
+
+  let value = clean(rest.slice(0, end));
+  // The rulebook's armor-mechanic definition ("Each point of armor reduces the
+  // damage received by 1 point") is not a creature's armor; reject it (it reaches
+  // a block only via an unbounded body running into the rules text).
+  if (/point of armor reduces the damage/i.test(value)) return null;
+  if (value.length > 200) {
+    const space = value.lastIndexOf(" ", 200);
+    value = value.slice(0, space > 0 ? space : 200);
+  }
+  // Drop a dangling "(" left when the cap/cut falls inside a parenthetical.
+  const open = (value.match(/\(/g) ?? []).length;
+  if (open > (value.match(/\)/g) ?? []).length)
+    value = clean(value.slice(0, value.lastIndexOf("(")));
   return value || null;
 }
 

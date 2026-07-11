@@ -147,7 +147,21 @@ function buildActorSystem(character: CocCharacter): Record<string, unknown> {
   const apr = parseAttacksPerRound(character.attacksPerRound);
   if (apr != null) system.special.attacksPerRound = apr;
 
+  const armor = armorAttrib(character.armor);
+  if (armor) system.attribs.armor = armor;
+
   return system;
+}
+
+// Map a parsed armor descriptor to the CoC7 armor attrib: the leading "N-point"
+// number becomes the armor value (0 for "none"/prose), and the full text is kept
+// as the armor notes. `auto: false` stops the sheet re-deriving it from items.
+function armorAttrib(
+  armor: string | null,
+): { value: number; auto: boolean; notes: string } | null {
+  if (!armor) return null;
+  const points = /(\d+)\s*-?\s*point/i.exec(armor);
+  return { value: points ? Number(points[1]) : 0, auto: false, notes: armor };
 }
 
 // After creation the system auto-derives HP/MP/MOV/build/DB from characteristics;

@@ -480,6 +480,38 @@ describe("parseCocCharacters (unit)", () => {
     assert.equal(c.sanityLoss, null);
   });
 
+  // Armor: an "N-point ..." descriptor or "none"; the rulebook's armor-mechanic
+  // sentence is not a creature's armor and is rejected.
+  test("armor is captured; the rules definition is rejected", () => {
+    const [a] = parseCocCharacters(
+      "Beast, hide STR 80 CON 80 SIZ 80 DEX 50 INT 40 APP 40 POW 50 EDU 40 SAN 40 HP 16 " +
+        "DB: +1D6 Build: 2 Move: 8 MP: 10 Combat Fighting 50% (25/10), damage 1D6 Dodge 25% (12/5) " +
+        "Armor: 3-point fur and gristle. Sanity Loss: 1/1D6 Sanity points to see the beast.",
+    );
+    assert.equal(a.armor, "3-point fur and gristle");
+    const [b] = parseCocCharacters(
+      "Guard, plain STR 50 CON 50 SIZ 50 DEX 50 INT 50 APP 50 POW 50 EDU 50 SAN 50 HP 10 " +
+        "DB: 0 Build: 0 Move: 8 MP: 10 Armor: none.",
+    );
+    assert.equal(b.armor, "none");
+    const [c] = parseCocCharacters(
+      "Human, plain STR 50 CON 50 SIZ 50 DEX 50 INT 50 APP 50 POW 50 EDU 50 SAN 50 HP 10 " +
+        "DB: 0 Build: 0 Move: 8 MP: 10 Armor: Each point of armor reduces the damage received by 1 point.",
+    );
+    assert.equal(c.armor, null);
+    // A period inside a parenthetical ("(e.g. ...)") must not cut the value.
+    const [d] = parseCocCharacters(
+      "Mage, robed STR 50 CON 50 SIZ 50 DEX 50 INT 80 APP 50 POW 90 EDU 80 SAN 40 HP 10 " +
+        "DB: 0 Build: 0 Move: 8 MP: 18 " +
+        "Armor: none, but the Scepters absorb 1D10 magical damage (e.g. if a spell is cast). " +
+        "Sanity Loss: 1/1D6 Sanity points to see it.",
+    );
+    assert.equal(
+      d.armor,
+      "none, but the Scepters absorb 1D10 magical damage (e.g. if a spell is cast)",
+    );
+  });
+
   // A lowercase section-label word in combat prose ("its special power",
   // "ignores any armor", "engage in combat") must not end the Combat section
   // before its real attack lines are reached.

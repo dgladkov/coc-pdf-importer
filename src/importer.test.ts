@@ -34,6 +34,7 @@ function makeCharacter(over: Partial<CocCharacter> = {}): CocCharacter {
     languages: {},
     spells: [],
     sanityLoss: null,
+    armor: null,
     notes: [],
     ...over,
   };
@@ -154,6 +155,27 @@ describe("importCharacters — system data", () => {
       { notify: false },
     );
     assert.equal(created[0].system.special.attacksPerRound, 4);
+  });
+
+  test("armor maps to attribs.armor (points value + full notes)", async () => {
+    await importCharacters(
+      [makeCharacter({ armor: "3-point fur and gristle" })],
+      { notify: false },
+    );
+    const armor = created[0].system.attribs.armor;
+    assert.equal(armor.value, 3);
+    assert.equal(armor.auto, false);
+    assert.equal(armor.notes, "3-point fur and gristle");
+  });
+
+  test("prose armor (no point value) maps to 0 with notes preserved", async () => {
+    await importCharacters(
+      [makeCharacter({ armor: "none, but immune to fire" })],
+      { notify: false },
+    );
+    const armor = created[0].system.attribs.armor;
+    assert.equal(armor.value, 0);
+    assert.equal(armor.notes, "none, but immune to fire");
   });
 
   test("sanity loss and notes are escaped into the keeper description", async () => {
