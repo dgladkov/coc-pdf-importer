@@ -424,7 +424,9 @@ function parseNameRun(
     .replace(/\s+:\s*/g, ": ");
   if (!heading) return null;
 
-  const ageMatch = /,\s*(?:age\s+|appears\s+)?(\d{1,3})\+?\s*(?:,|$)/i.exec(
+  // "ages?"/"appears?": a plural "ages 57, 59, and 60" list is matched from its
+  // marker so the whole list is kept out of the name (not just up to the 2nd age).
+  const ageMatch = /,\s*(?:ages?\s+|appears?\s+)?(\d{1,3})\+?\s*(?:,|$)/i.exec(
     heading,
   );
   if (ageMatch) {
@@ -464,10 +466,19 @@ function parseHeader(
   // the stat block follows immediately (e.g. "Name: Archetype, age 40  STR").
   // Several candidates can appear in the window (leftover prose from the
   // previous block); take the one closest to the STR anchor.
-  const ageRe = /,\s*(?:age\s+|appears\s+)?(\d{1,3})\+?\s*(?:,|(?=\s*$))/gi;
+  // "age"/"ages"/"appears" — a group of siblings may share a plural "ages 57, 59,
+  // and 60" list. Prefer the last match carrying that explicit marker: it sits at
+  // the start of the list, so the name stops before the whole list (a later bare
+  // ", 59," is a continuation, not a new name).
+  const ageRe = /,\s*((?:ages?|appears?)\s+)?(\d{1,3})\+?\s*(?:,|(?=\s*$))/gi;
 
   let best: RegExpMatchArray | null = null;
-  for (const m of window.matchAll(ageRe)) best = m;
+  let prefixed: RegExpMatchArray | null = null;
+  for (const m of window.matchAll(ageRe)) {
+    best = m;
+    if (m[1]) prefixed = m;
+  }
+  best = prefixed ?? best;
 
   if (best) {
     const commaAbs = winStart + (best.index ?? 0);
@@ -481,7 +492,7 @@ function parseHeader(
     const description = trimDescription(text.slice(descAbs, strIndex));
     return {
       name,
-      age: Number(best[1]),
+      age: Number(best[2]),
       description,
       headerStart: nameStartAbs(text, commaAbs, name),
     };
@@ -1351,6 +1362,26 @@ function combatSection(body: string): string {
   return clean(rest.slice(0, end));
 }
 
+// A spell name is a short run of capitalised words and name particles. Stop at
+// the first prose word (a non-particle lowercase word) so a list that runs into
+// next-page prose ("Contact Yogge Sothyothe are tethered close by ...") keeps
+// only "Contact Yogge Sothyothe".
+const SPELL_PARTICLE =
+  /^(?:of|the|and|or|de|del|van|von|la|le|du|da|el|bin|al|ibn|den|der|in|à)$/i;
+function trimSpellName(name: string): string {
+  // Only salvage suspiciously long entries: a genuine spell name is a few words
+  // (and may legitimately contain lowercase words — "Implant fear", "Journey to
+  // the Other Side"), but a list that bleeds into next-page prose produces one
+  // very long entry. Leave normal-length names untouched.
+  if (name.length <= 40) return name;
+  const out: string[] = [];
+  for (const w of name.split(/\s+/).filter(Boolean)) {
+    if (/^[A-Z0-9"(#]/.test(w) || SPELL_PARTICLE.test(w)) out.push(w);
+    else break;
+  }
+  return out.join(" ");
+}
+
 // A spell list. Two layouts occur:
 //  - comma-separated names ("Call the Black Sphinx*, Contact Nyarlathotep, ...")
 //  - named entries with descriptions ("DOMINATE (Corbitt's variant): ...")
@@ -1373,7 +1404,11 @@ function parseSpells(text: string): string[] {
     const names: string[] = [];
     const re = /(?:^|[.;]\s+)([A-Z][A-Za-z0-9'\- ]*(?:\s*\([^)]*\))?)\s*:/g;
     for (const m of text.matchAll(re)) {
-      const name = clean(m[1]);
+      const raw = clean(m[1]);
+      // "Keeper note:" and similar prose labels look like a named entry but are
+      // not spells; a real spell name never contains the word "note".
+      if (/\bnotes?\b/i.test(raw)) continue;
+      const name = trimSpellName(raw);
       if (name) names.push(name);
     }
     return names;
@@ -1391,13 +1426,16 @@ function parseSpells(text: string): string[] {
 
   return list
     .split(/\s*,\s*/)
-    .map((s) => clean(s.replace(/[*✝‡†●]/g, ""))) // drop "see description" markers
+    // drop "see description" markers, then trim any prose that runs off the end
+    // of the last name (page-break bleed into the next creature's description).
+    .map((s) => trimSpellName(clean(s.replace(/[*✝‡†●]/g, ""))))
     .filter(
       (s) =>
         s.length > 0 &&
         /^[A-Z]/.test(s) &&
         !/^(?:and|or)\b/i.test(s) &&
-        !/^none$/i.test(s),
+        !/^none$/i.test(s) &&
+        !/\bnotes?\b/i.test(s),
     );
 }
 
@@ -1497,9 +1535,10 @@ function parseAttacksPerRound(combatText: string): string | null {
 function parseCombat(text: string): CombatEntry[] {
   if (!text) return [];
 
-  // Tighten a spaced "+" between numbers in a dice expression ("1D10 + 2" ->
-  // "1D10+2") so the trailing operand isn't read as the start of the next attack.
-  text = text.replace(/(\d)\s*\+\s*(\d)/g, "$1+$2");
+  // Tighten a spaced "+"/"-" between numbers in a dice expression ("1D10 + 2",
+  // "1D3 - 1") so the trailing operand isn't read as the start of the next attack
+  // ("1D3 - 1 Dodge" would otherwise leave damage "1D3 -" and read "1 Dodge").
+  text = text.replace(/(\d)\s*([+-])\s*(\d)/g, "$1$2$3");
 
   // Some books label the half/fifth values, with or without % signs and spaces:
   // "(Hard 20/Extreme 8)" or "(Hard 25%/Extreme10%)" -> "(20/8)" / "(25/10)".

@@ -763,6 +763,31 @@ describe("parseCocCharacters (unit)", () => {
     ]);
   });
 
+  // When the last name in a comma list runs off into next-page prose, the
+  // over-long entry is trimmed back to the spell name (the capitalised run),
+  // while normal-length names — even ones with lowercase words — are kept whole.
+  test("a spell name is trimmed where the list bleeds into prose", () => {
+    const [c] = parseCocCharacters(
+      "Sorcerer, cruel STR 50 CON 50 SIZ 50 DEX 50 INT 80 APP 50 POW 90 EDU 80 SAN 20 HP 10 " +
+        "DB: 0 Build: 0 Move: 8 MP: 18 " +
+        "Spells: Wither Limb, Contact Deity are tethered close by and their " +
+        "barks attract a guard watching the theater at night",
+    );
+    assert.deepEqual(c.spells, ["Wither Limb", "Contact Deity"]);
+  });
+
+  // A "Keeper note:" prose label in the spell region reads like a named,
+  // described entry but is not a spell — a real spell name never says "note".
+  test('a "Keeper note" label is not read as a spell', () => {
+    const [c] = parseCocCharacters(
+      "Monster, vast STR 550 CON 350 SIZ 400 DEX 40 INT 60 POW 90 HP 75 " +
+        "DB: +6D6 Build: 7 Move: 6 MP: 18 " +
+        "Spells: Dominate (variant): the target obeys. Keeper note: this is " +
+        "advice for running the scene, not a spell.",
+    );
+    assert.deepEqual(c.spells, ["Dominate (variant)"]);
+  });
+
   // An auto-hit attack reads "automatic" where a skill % would sit and may carry
   // a non-dice damage ("Energy Blast automatic, damage, 20 points").
   test("an auto-hit attack with a non-dice damage is captured", () => {

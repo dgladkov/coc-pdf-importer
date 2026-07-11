@@ -13,6 +13,8 @@ Tested on the following documents:
 - Gateways to Terror
 - Doors to Darkness
 - Dead Light and Other Dark Turns
+- Does Love Forgive
+- Mansions of Madness
 
 Note that the importer will skip large portions of important description prose,
 such as maneuver mechanics and creature flavor - consult the source documents
