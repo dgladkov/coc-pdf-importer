@@ -508,6 +508,20 @@ function isThrownAttack(attack: CombatEntry, matched: any | null): boolean {
   return /\(thrown\)|throwing|boomerang|shuriken|javelin/i.test(attack.name);
 }
 
+// A thrown weapon is a ranged weapon that ranges to STR/5 yards, matching the
+// core "Rock, Thrown" profile. (The system's own `thrown` property is left
+// false: it only swaps the roll to a weapon's *alternative* skill, but a thrown
+// weapon's main skill already is Throw. Its half damage bonus is handled by the
+// damage normalization, and its Throw skill is attached in the second pass.)
+function applyThrownProfile(weapon: any): void {
+  const sys = (weapon.system = weapon.system ?? {});
+  sys.properties = sys.properties ?? {};
+  sys.properties.rngd = true;
+  sys.range = sys.range ?? {};
+  sys.range.normal = sys.range.normal ?? {};
+  sys.range.normal.value = "@STR/5";
+}
+
 function buildItems(
   character: CocCharacter,
   indexes: CompendiumIndexes,
@@ -583,6 +597,7 @@ function buildItems(
         ranged = FIREARM_RE.test(attack.name);
         weapon = customWeaponData(attack, ranged, character.derived.DB);
       }
+      if (thrown) applyThrownProfile(weapon);
       customWeapons.push({ weapon, value: attack.value, ranged, thrown });
     }
   }

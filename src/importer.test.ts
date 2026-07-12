@@ -688,6 +688,25 @@ describe("importCharacters — items", () => {
     assert.equal(w("Rock").system.properties.ahdb, false);
   });
 
+  test("a thrown weapon is ranged and ranges to STR/5", async () => {
+    await importCharacters(
+      [
+        makeCharacter({
+          combat: [attack("Dart (thrown)", { value: 35, damage: "1D4" })],
+        }),
+      ],
+      { notify: false },
+    );
+    const w = created[0].items.find(
+      (i: any) => i.type === "weapon" && i.name === "Dart (thrown)",
+    );
+    assert.equal(w.system.properties.rngd, true);
+    assert.equal(w.system.range.normal.value, "@STR/5");
+    // The system's own `thrown` property stays false (it only swaps the roll to
+    // the alternative skill; a thrown weapon's main skill already is Throw).
+    assert.notEqual(w.system.properties.thrown, true);
+  });
+
   test("a thrown weapon uses the actor's Throw skill when the value matches", async () => {
     await importCharacters(
       [
