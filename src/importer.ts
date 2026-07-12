@@ -521,6 +521,9 @@ function buildItems(
     if (found) {
       const weapon = structuredClone(found);
       delete weapon._id;
+      // Keep the stat block's own name (so the keeper can cross-check against the
+      // book) while taking the compendium weapon's stats, icon, and CoCID.
+      weapon.name = attack.name;
       const ranged = !!weapon.system?.properties?.rngd;
       const refs = [
         { ref: weapon.system?.skill?.main?.name, value: attack.value ?? 0 },

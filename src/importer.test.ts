@@ -492,7 +492,7 @@ describe("importCharacters — items", () => {
     assert.equal(weapon.system.skill.main.id, firearms[0].id);
   });
 
-  test("an abbreviated firearm matches the canonical compendium weapon", async () => {
+  test("an abbreviated firearm matches the compendium weapon but keeps its book name", async () => {
     mockCompendium({
       weapons: [
         weaponDoc(".38 or 9mm Revolver"),
@@ -512,14 +512,17 @@ describe("importCharacters — items", () => {
       ],
       { notify: false },
     );
-    const names = created[0].items
-      .filter((i: any) => i.type === "weapon")
-      .map((w: any) => w.name);
-    assert.deepEqual(names.sort(), [
-      ".38 or 9mm Revolver",
-      ".45 Automatic",
-      "12-gauge Shotgun (2B)",
+    const weapons = created[0].items.filter((i: any) => i.type === "weapon");
+    // The stat block's own names are kept...
+    assert.deepEqual(weapons.map((w: any) => w.name).sort(), [
+      ".38 revolver",
+      ".45 auto",
+      "12-g shotgun",
     ]);
+    // ...but the matched compendium weapon supplied the icon and CoCID identity.
+    const rev = weapons.find((w: any) => w.name === ".38 revolver");
+    assert.equal(rev.img, "weapon.svg");
+    assert.match(rev.flags.CoC7.cocidFlag.id, /9mm-revolver/);
   });
 
   test("Thompson prefers the core 50-mag weapon, then the wiki fallback", async () => {
@@ -528,10 +531,9 @@ describe("importCharacters — items", () => {
       [makeCharacter({ combat: [attack("Thompson SMG", { value: 45, damage: "1D10+2" })] })],
       { notify: false },
     );
-    assert.ok(
-      created[0].items.some((i: any) => i.name === "Thompson (50 mag)"),
-      "core preferred",
-    );
+    const w = created[0].items.find((i: any) => i.type === "weapon");
+    assert.equal(w.name, "Thompson SMG"); // book name kept
+    assert.match(w.flags.CoC7.cocidFlag.id, /thompson-50-mag/); // core weapon used
 
     created.length = 0;
     mockCompendium({ weapons: [weaponDoc("Thompson")] }); // only the wiki pack
@@ -539,10 +541,9 @@ describe("importCharacters — items", () => {
       [makeCharacter({ combat: [attack("Thompson submachine gun", { value: 45, damage: "1D10+2" })] })],
       { notify: false },
     );
-    assert.ok(
-      created[0].items.some((i: any) => i.name === "Thompson"),
-      "wiki fallback",
-    );
+    const w2 = created[0].items.find((i: any) => i.type === "weapon");
+    assert.equal(w2.name, "Thompson submachine gun");
+    assert.equal(w2.flags.CoC7.cocidFlag.id, "i.weapon.thompson"); // wiki fallback
   });
 
   test("knife/club size is deduced from damage, ignoring the damage bonus", async () => {
@@ -559,24 +560,24 @@ describe("importCharacters — items", () => {
       [
         makeCharacter({
           combat: [
-            attack("Knife", { value: 40, damage: "1D4+1D6" }), // small (DB die ignored)
+            attack("Switchblade", { value: 40, damage: "1D4+1D6" }), // small (DB die ignored)
             attack("Kitchen knife", { value: 40, damage: "1D4+2+DB" }), // medium
             attack("Hunting knife", { value: 40, damage: "1D8+1D4" }), // large
-            attack("Club", { value: 40, damage: "1D6+1D4" }), // small
-            attack("Club", { value: 40, damage: "1D8+1" }), // large
+            attack("Nightstick", { value: 40, damage: "1D6+1D4" }), // small club
+            attack("Heavy club", { value: 40, damage: "1D8+1" }), // large club
           ],
         }),
       ],
       { notify: false },
     );
-    const names = created[0].items
-      .filter((i: any) => i.type === "weapon")
-      .map((w: any) => w.name);
-    assert.ok(names.includes("Knife, Small (switchblade, etc.)"));
-    assert.ok(names.includes("Knife, Medium (carving knife, etc.)"));
-    assert.ok(names.includes("Knife, Large (machete, etc.)"));
-    assert.ok(names.includes("Club, small (nightstick)"));
-    assert.ok(names.includes("Club, large (baseball, cricket bat, poker)"));
+    const cocid = (n: string) =>
+      created[0].items.find((i: any) => i.type === "weapon" && i.name === n)
+        .flags.CoC7.cocidFlag.id;
+    assert.match(cocid("Switchblade"), /knife-small/);
+    assert.match(cocid("Kitchen knife"), /knife-medium/);
+    assert.match(cocid("Hunting knife"), /knife-large/);
+    assert.match(cocid("Nightstick"), /club-small/);
+    assert.match(cocid("Heavy club"), /club-large/);
   });
 
   test("a melee weapon never matches a firearm entry (class-gated)", async () => {
