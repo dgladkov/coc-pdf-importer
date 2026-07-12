@@ -392,6 +392,15 @@ function meleeCandidates(attack: CombatEntry): string[] {
   const dmg = (attack.damage ?? "").toLowerCase().replace(/\s+/g, "");
   if (/cosh|blackjack/.test(name))
     return ["Blackjack (Cosh, life-preserver)", "Blackjack"];
+  // Any name containing "sword" (generic, so unique names like "Sword of
+  // Akmallah" or compounds like "broadsword" need no hardcoding): a heavy-saber
+  // damage picks the heavy sword, otherwise medium — the book-damage override
+  // corrects a mismatch either way.
+  if (/sword/.test(name)) {
+    return /^1d8\+1\b/.test(dmg)
+      ? ["Sword, heavy (cavalry saber)"]
+      : ["Sword, medium (rapier, heavy epee)"];
+  }
   if (/\bknife\b|\bdagger\b|switchblade|straight razor|\bmachete\b/.test(name)) {
     const size = /^1d8\b/.test(dmg)
       ? "Large"
@@ -402,12 +411,18 @@ function meleeCandidates(attack: CombatEntry): string[] {
           : "Medium";
     return KNIFE_BY_SIZE[size];
   }
-  if (/\bclub\b|nightstick|truncheon|cudgel/.test(name)) {
+  // Clubs and other blunt weapons (crowbar, bat, wrench, spade, ...): a large
+  // club is 1D8, a small club 1D6; default large.
+  if (
+    /\bclub\b|nightstick|truncheon|cudgel|crowbar|\bwrench\b|\bhammer\b|\bbat\b|\bspade\b|\bmallet\b|walking stick|\bstaff\b|\bbaton\b|pickaxe/.test(
+      name,
+    )
+  ) {
     const size = /^1d8\b/.test(dmg)
       ? "Large"
       : /^1d6\b/.test(dmg)
         ? "Small"
-        : /nightstick/.test(name)
+        : /nightstick|walking stick|\bbaton\b/.test(name)
           ? "Small"
           : "Large";
     return CLUB_BY_SIZE[size];
@@ -440,6 +455,11 @@ const WEAPON_ALIASES: {
   // rifles
   { re: /\.30-06\b/i, names: [".30-06 Bolt-Action Rifle"] },
   { re: /\.303\b/i, names: [".303 Lee-Enfield"] },
+  { re: /\belephant\b[^.]*\bgun\b/i, names: ["Elephant Gun (2B)"] },
+  { re: /browning\s+auto(?:matic)?\s+rifle/i, names: ["Browning Auto Rifle M1918"] },
+  // named handguns whose flavor name hides a standard caliber
+  { re: /\bwebley\b/i, names: [".38 or 9mm Revolver"], handgun: true },
+  { re: /\bnambu\b/i, names: [".32 or 7.65mm Automatic"], handgun: true },
   // shotguns
   { re: /\b12[\s-]?(?:g|ga|gauge|gage)\b/i, names: ["12-gauge Shotgun (2B)"] },
   { re: /\b20[\s-]?(?:g|ga|gauge|gage)\b/i, names: ["20-gauge Shotgun (2B)"] },

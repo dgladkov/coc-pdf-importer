@@ -580,6 +580,65 @@ describe("importCharacters — items", () => {
     assert.match(cocid("Heavy club"), /club-large/);
   });
 
+  test("blunt weapons and swords alias to Club/Sword by damage", async () => {
+    mockCompendium({
+      weapons: [
+        weaponDoc("Club, large (baseball, cricket bat, poker)"),
+        weaponDoc("Club, small (nightstick)"),
+        weaponDoc("Sword, medium (rapier, heavy epee)"),
+        weaponDoc("Sword, heavy (cavalry saber)"),
+      ],
+    });
+    await importCharacters(
+      [
+        makeCharacter({
+          combat: [
+            attack("Crowbar", { value: 40, damage: "1D8" }),
+            attack("Walking stick", { value: 40, damage: "1D6" }),
+            attack("Broadsword", { value: 40, damage: "1D8" }), // no "1D8+1" -> medium
+            attack("Sword of Akmallah", { value: 40, damage: "1D8+1" }), // -> heavy
+          ],
+        }),
+      ],
+      { notify: false },
+    );
+    const cocid = (n: string) =>
+      created[0].items.find((i: any) => i.type === "weapon" && i.name === n)
+        .flags.CoC7.cocidFlag.id;
+    assert.match(cocid("Crowbar"), /club-large/);
+    assert.match(cocid("Walking stick"), /club-small/);
+    assert.match(cocid("Broadsword"), /sword-medium/);
+    assert.match(cocid("Sword of Akmallah"), /sword-heavy/);
+  });
+
+  test("flavor-named firearms alias to their standard weapon", async () => {
+    mockCompendium({
+      weapons: [
+        weaponDoc("Elephant Gun (2B)"),
+        weaponDoc(".38 or 9mm Revolver"),
+        weaponDoc(".32 or 7.65mm Automatic"),
+      ],
+    });
+    await importCharacters(
+      [
+        makeCharacter({
+          combat: [
+            attack("Elephant gun", { value: 40, damage: "3D6+4" }),
+            attack("Webley revolver", { value: 40, damage: "1D10" }),
+            attack("Nambu pistol", { value: 40, damage: "1D8" }),
+          ],
+        }),
+      ],
+      { notify: false },
+    );
+    const cocid = (n: string) =>
+      created[0].items.find((i: any) => i.type === "weapon" && i.name === n)
+        .flags.CoC7.cocidFlag.id;
+    assert.match(cocid("Elephant gun"), /elephant-gun/);
+    assert.match(cocid("Webley revolver"), /9mm-revolver/);
+    assert.match(cocid("Nambu pistol"), /7-65mm-automatic/);
+  });
+
   test("an inlined damage bonus is normalized to the addb flag", async () => {
     await importCharacters(
       [
