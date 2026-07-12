@@ -1747,6 +1747,12 @@ function parseCombat(text: string): CombatEntry[] {
   // damage at it; drop the period so the name reads as one weapon.
   text = text.replace(/\b(Med|Lge?|Sml?|Hvy)\.\s+/g, "$1 ");
 
+  // A footnote marker glued to an attack's skill value ("Switchblade*65%",
+  // "Dragon Fist*80%") hides the "%", so the previous attack's damage swallows
+  // this whole profile instead of it being read as its own attack; drop a "*"
+  // that sits immediately before a "NN%".
+  text = text.replace(/\*(?=\s*\d{1,3}\s*%)/g, " ");
+
   // An attack name: an optional honorific ("Mrs. Carruthers (elephant gun)"),
   // an optional caliber dot, then a capital/digit start, then a run of name
   // characters. Internal periods are allowed only as an honorific or a caliber
@@ -1766,7 +1772,10 @@ function parseCombat(text: string): CombatEntry[] {
   // prose, one over the stat lines), leaving a heading word glued before the
   // first attack ("... hideous scar. Combat Fighting 60% ..."); no attack is
   // named "Combat", so never start a name there.
-  const attackName = String.raw`${honorific}(?!\d+[dD]\d+\b)(?!DB\b)(?!Combat\b)\.?[A-Z0-9](?:[A-Za-z0-9 /'"+#*-]|\([^),]*\)|\.\d)*?`;
+  // Accented Latin letters (À-ɏ) are allowed so a name like "Tantō" or
+  // "Feng Wāng" reads as one token rather than truncating at the accent — which
+  // would hide the following attack profile and let the prior damage swallow it.
+  const attackName = String.raw`${honorific}(?!\d+[dD]\d+\b)(?!DB\b)(?!Combat\b)\.?[A-Z0-9À-ɏ](?:[A-Za-z0-9 /'"+#*À-ɏ-]|\([^),]*\)|\.\d)*?`;
   // The start of the next attack, used only to bound the damage of this one. An
   // attack profile is a value followed by a "(half/fifth)" or ", damage". The %
   // is optional (some Dodges read "Dodge 27 (13/5)") and a comma may sit before
@@ -1834,6 +1843,8 @@ function parseCombat(text: string): CombatEntry[] {
 // A Brawl/Fighting attack often lists weapon alternatives inline in its damage:
 //   "1D3+1D4 or blackjack 1D8+1D4"        -> Brawl 1D3+1D4, Blackjack 1D8+1D4
 //   "1D3, knife 1D4, or club 1D6"         -> Brawl 1D3, Knife 1D4, Club 1D6
+//   "1D3, or brass knuckles, 1D3+1"       -> Brawl 1D3, Brass knuckles 1D3+1
+//   "1D3+1D4, or billy club, damage 1D6"  -> Brawl 1D3+1D4, Billy club 1D6
 //   "1D3+1D4 or weapon" / "1D3 or by weapon" -> Brawl 1D3+1D4 / 1D3 (the bare
 //     "or weapon" is fully redundant with the brawl damage, so it's dropped)
 // Each named alternative becomes its own combat entry sharing the brawl skill's
@@ -1848,21 +1859,39 @@ function splitWeaponAlternatives(entry: CombatEntry): CombatEntry[] {
   const m = new RegExp(String.raw`^(${BASE_DICE})\s*(.*)$`).exec(entry.damage);
   if (!m) return [entry];
   const base = m[1];
-  // Strip the separator that introduces the alternatives (",", "or", ", or"),
-  // tolerating leading footnote markers ("1D3+1D6** or fighting knife ...").
-  const rest = m[2].trim().replace(/^[\s*]*,?\s*(?:or\s+)?/i, "");
+  // The alternatives must be introduced by a real separator ("," / ";" / "or" /
+  // "with"), tolerating leading footnote markers ("1D3+1D6** or fighting knife").
+  // Without one, the remainder is a continuation of the damage formula, not an
+  // alternative ("1D3 + damage bonus(1D4)"), and the entry is left untouched.
+  const after = m[2].trim();
+  const sep = /^[\s*]*(?:[,;]\s*(?:or\s+|with\s+)?|(?:or|with)\s+)/i.exec(after);
+  if (!sep) return [entry];
+  const rest = after.slice(sep[0].length);
   if (!rest) return [entry];
 
+  // Alternatives are separated by "or"/"with", or by a comma/semicolon that is
+  // followed by another weapon NAME (a letter) — never a comma that merely
+  // separates a weapon's name from its own damage ("brass knuckles, 1D3+1", or
+  // the "damage" keyword form "billy club, damage 1D6+1D4").
+  const chunks = rest.split(
+    /\s*[,;]\s*(?:or\s+|with\s+)?(?=[A-Za-z])(?!damage\b)|\s+(?:or|with)\s+(?=[A-Za-z])(?!damage\b)/i,
+  );
   const weapons: CombatEntry[] = [];
-  for (const chunk of rest.split(/\s*,\s*(?:or\s+)?|\s+or\s+/i)) {
-    const alt = chunk.trim();
+  for (const chunk of chunks) {
+    const alt = chunk.trim().replace(/^[,;\s]+|[,;\s]+$/g, "");
     if (!alt) continue;
-    if (/^(?:by\s+)?weapons?$/i.test(alt)) continue; // redundant "or weapon"
-    const wm = /^(.*?\S)\s+(\d+[dD]\d+.*)$/.exec(alt);
+    if (/^(?:by\s+)?weapons?\b/i.test(alt)) continue; // redundant "or weapon"
+    // A weapon name, then its damage separated by a space or a ", " and an
+    // optional "damage" keyword ("brass knuckles, 1D3+1", "billy club, damage
+    // 1D6+1D4", "knife 1D4"). The damage must start with a dice term.
+    const wm = /^(.*?\S)\s*,?\s*(?:damage\s+)?(\d+[dD]\d+.*)$/i.exec(alt);
     if (!wm) return [entry]; // unrecognized prose -> leave the entry as-is
+    // Trim stray operator/footnote chars a lazy name capture may keep ("brass
+    // knuckles +" from "with brass knuckles +1D3+1").
+    const name = wm[1].replace(/^[\s+*-]+|[\s+*-]+$/g, "");
     const { damage, note } = splitDamageNote(wm[2]);
     weapons.push({
-      name: wm[1].charAt(0).toUpperCase() + wm[1].slice(1),
+      name: name.charAt(0).toUpperCase() + name.slice(1),
       value: entry.value,
       half: entry.half,
       fifth: entry.fifth,

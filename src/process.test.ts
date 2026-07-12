@@ -306,6 +306,104 @@ describe("parseCocCharacters (unit)", () => {
     assert.equal(c.combat.length, 2); // Fighting + Dodge only, no phantom weapon
   });
 
+  test("a comma between an alternative's name and its own damage is not a split point", () => {
+    const [c] = parseCocCharacters(
+      "Goon, x STR 60 CON 60 SIZ 60 DEX 50 INT 50 APP 50 POW 50 EDU 50 SAN 50 HP 12 " +
+        "DB: 0 Build: 0 Move: 8 MP: 10 Combat Attacks per round: 1 " +
+        // "brass knuckles, 1D3+1": the comma joins name to damage, not two weapons.
+        "Brawl 55% (27/11), damage 1D3, or brass knuckles, 1D3+1 Dodge 25% (12/5)",
+    );
+    assert.deepEqual(c.combat.slice(0, 2), [
+      { name: "Brawl", value: 55, half: 27, fifth: 11, damage: "1D3", note: null },
+      { name: "Brass knuckles", value: 55, half: 27, fifth: 11, damage: "1D3+1", note: null },
+    ]);
+  });
+
+  test("an alternative that spells its damage with the 'damage' keyword splits cleanly", () => {
+    const [c] = parseCocCharacters(
+      "Goon, x STR 60 CON 60 SIZ 60 DEX 50 INT 50 APP 50 POW 50 EDU 50 SAN 50 HP 12 " +
+        "DB: 0 Build: 0 Move: 8 MP: 10 Combat Attacks per round: 1 " +
+        "Brawl 55% (27/11), damage 1D3+1D4, or billy club, damage 1D6+1D4 Dodge 25% (12/5)",
+    );
+    assert.deepEqual(
+      c.combat.slice(0, 2).map((a) => ({ name: a.name, damage: a.damage })),
+      [
+        { name: "Brawl", damage: "1D3+1D4" },
+        { name: "Billy club", damage: "1D6+1D4" },
+      ],
+    );
+  });
+
+  test("';' and 'with' introduce weapon alternatives, and names shed stray operators", () => {
+    const [c] = parseCocCharacters(
+      "Goon, x STR 60 CON 60 SIZ 60 DEX 50 INT 50 APP 50 POW 50 EDU 50 SAN 50 HP 12 " +
+        "DB: 0 Build: 0 Move: 8 MP: 10 Combat Attacks per round: 1 " +
+        // ";", "with", and a trailing "+" on the additive form all normalize.
+        "Brawl 50% (25/10), damage 1D3+1D4; with brass knuckles +1D3+1 Dodge 25% (12/5)",
+    );
+    assert.deepEqual(
+      c.combat.slice(0, 2).map((a) => ({ name: a.name, damage: a.damage })),
+      [
+        { name: "Brawl", damage: "1D3+1D4" },
+        { name: "Brass knuckles", damage: "1D3+1" },
+      ],
+    );
+  });
+
+  test("a spelled-out '+ damage bonus(...)' is a damage continuation, not an alternative", () => {
+    const [c] = parseCocCharacters(
+      "Ghoul, x STR 60 CON 60 SIZ 60 DEX 50 INT 50 APP 50 POW 50 EDU 50 SAN 50 HP 12 " +
+        "DB: 0 Build: 0 Move: 8 MP: 10 Combat Attacks per round: 1 " +
+        "Fighting 55% (27/11), damage 1D3 + damage bonus(1D4) + possible infection Dodge 30% (15/6)",
+    );
+    const f = c.combat.find((a) => a.name === "Fighting")!;
+    assert.equal(f.damage, "1D3 + damage bonus(1D4) + possible infection");
+    assert.equal(c.combat.length, 2); // Fighting + Dodge, no phantom weapon
+  });
+
+  test("a truncated 'or by weapon (e.g...)' clause is dropped, not kept as damage", () => {
+    const [c] = parseCocCharacters(
+      "Fish, deep STR 80 CON 80 SIZ 80 DEX 50 INT 50 APP — POW 60 EDU — SAN — HP 16 " +
+        "DB: +1D4 Build: 2 Move: 8 MP: 12 Combat Attacks per round: 1 " +
+        "Fighting 40% (20/8), damage 1D6+1D4 or by weapon (e.g Dodge 20% (10/4)",
+    );
+    const f = c.combat.find((a) => a.name === "Fighting")!;
+    assert.equal(f.damage, "1D6+1D4");
+    assert.equal(c.combat.some((a) => /weapon/i.test(a.name)), false);
+  });
+
+  test("a footnote '*' glued to a skill value does not hide the following attack", () => {
+    const [c] = parseCocCharacters(
+      "Thug, x STR 60 CON 60 SIZ 60 DEX 50 INT 50 APP 50 POW 50 EDU 50 SAN 50 HP 12 " +
+        "DB: +1D4 Build: 1 Move: 8 MP: 10 Combat Attacks per round: 1 " +
+        // "Switchblade*65%" would otherwise be swallowed into the Brawl damage.
+        "Brawl 65% (32/13), damage 1D3+1D4 Switchblade*65% (32/13), damage 1D6+1D4 Dodge 25% (12/5)",
+    );
+    assert.deepEqual(
+      c.combat.slice(0, 2).map((a) => ({ name: a.name, damage: a.damage })),
+      [
+        { name: "Brawl", damage: "1D3+1D4" },
+        { name: "Switchblade", damage: "1D6+1D4" },
+      ],
+    );
+  });
+
+  test("an accented weapon name is read whole, not truncated at the accent", () => {
+    const [c] = parseCocCharacters(
+      "Guard, x STR 60 CON 60 SIZ 60 DEX 50 INT 50 APP 50 POW 50 EDU 50 SAN 50 HP 12 " +
+        "DB: +1D4 Build: 1 Move: 8 MP: 10 Combat Attacks per round: 1 " +
+        // "Tantō" must not truncate at "ō", which would hide its "65%" profile.
+        "Brawl 60% (30/12), damage 1D3+1D4 Tantō 65% (32/13), damage 1D4+1 Dodge 25% (12/5)",
+    );
+    assert.deepEqual(
+      c.combat.slice(0, 2).map((a) => ({ name: a.name, damage: a.damage })),
+      [
+        { name: "Brawl", damage: "1D3+1D4" },
+        { name: "Tantō", damage: "1D4+1" },
+      ],
+    );
+  });
+
   test("skill/language entries shed qualifiers, prose, and unbalanced parens", () => {
     const [c] = parseCocCharacters(
       "Guard, watch STR 50 CON 50 SIZ 50 DEX 50 INT 50 APP 50 POW 50 EDU 50 SAN 50 HP 10 " +
