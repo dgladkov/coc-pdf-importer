@@ -838,6 +838,49 @@ describe("parseCocCharacters (unit)", () => {
     assert.deepEqual(c.background, []);
   });
 
+  // A pre-gen's carried gear is printed as a comma list under a bare
+  // "Possessions"/"Equipment" heading; it is parsed into an items array with the
+  // trailing "and" dropped and leading dots (".38") preserved.
+  test("a Possessions gear list is parsed into an items array", () => {
+    const [c] = parseCocCharacters(
+      "Sleuth, private eye, age 40 STR 50 CON 50 SIZ 50 DEX 50 INT 70 APP 60 POW 60 EDU 75 SAN 55 HP 10 " +
+        "DB: 0 Build: 0 Move: 8 " +
+        "Skills: Spot Hidden 60%. " +
+        "Possessions Notebook, engraved fountain pen, and a .38 revolver.",
+    );
+    assert.deepEqual(c.items, [
+      "Notebook",
+      "engraved fountain pen",
+      "a .38 revolver",
+    ]);
+  });
+
+  // A comma inside brackets itemizes one item's contents and must not split it
+  // ("ghost hunting kit (talcum powder, thermometer, string)" is one item).
+  test("a bracketed sub-list stays a single item", () => {
+    const [c] = parseCocCharacters(
+      "Sleuth, private eye, age 40 STR 50 CON 50 SIZ 50 DEX 50 INT 70 APP 60 POW 60 EDU 75 SAN 55 HP 10 " +
+        "DB: 0 Build: 0 Move: 8 " +
+        "Equipment: ghost hunting kit (talcum powder, thermometer, string, Holy Bible), flashlight, notebook",
+    );
+    assert.deepEqual(c.items, [
+      "ghost hunting kit (talcum powder, thermometer, string, Holy Bible)",
+      "flashlight",
+      "notebook",
+    ]);
+  });
+
+  // "Treasured Possessions" is the background/ties section, not a gear list — the
+  // items parser must not pick it up.
+  test("a Treasured Possessions section is not read as a gear list", () => {
+    const [c] = parseCocCharacters(
+      "Clerk, timid STR 50 CON 50 SIZ 50 DEX 50 INT 70 APP 60 POW 60 EDU 75 SAN 55 HP 10 " +
+        "DB: 0 Build: 0 Move: 8 " +
+        "Treasured Possessions: a photograph of a lost love.",
+    );
+    assert.deepEqual(c.items, []);
+  });
+
   // An auto-hit attack reads "automatic" where a skill % would sit and may carry
   // a non-dice damage ("Energy Blast automatic, damage, 20 points").
   test("an auto-hit attack with a non-dice damage is captured", () => {

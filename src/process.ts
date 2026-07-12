@@ -112,6 +112,7 @@ export interface CocCharacter {
   sanityLoss: string | null; // present for monsters, null for ordinary NPCs
   armor: string | null; // e.g. "3-point fur and gristle", "none"; null when absent
   background: BackgroundSection[]; // extracted background sections (may also appear on NPC/villain human stat blocks); the importer decides investigator typing
+  items: string[]; // carried gear, from a "Possessions"/"Equipment" list; empty when absent
   notes: string[];
 }
 
@@ -810,9 +811,12 @@ function parseBlock(
   // false hit, not a background.
   const col0 = characteristicsForColumn(cols, 0);
   let background: BackgroundSection[] = [];
+  let items: string[] = [];
   if (col0.APP?.value != null && col0.EDU?.value != null) {
     background = parseBackground(body);
     if (!background.length) background = parseBackground(sharedTail);
+    items = parseItems(body);
+    if (!items.length) items = parseItems(sharedTail);
   }
   const note = parseNoteBeforeCombat(body);
   const notes = note ? [note] : [];
@@ -841,6 +845,7 @@ function parseBlock(
         sanityLoss,
         armor,
         background,
+        items,
         notes,
       },
     ];
@@ -898,6 +903,7 @@ function parseBlock(
       sanityLoss,
       armor,
       background,
+      items,
       notes,
     });
   }
@@ -1598,6 +1604,70 @@ function parseBackground(body: string): BackgroundSection[] {
     if (/[A-Za-z]/.test(text)) out.push({ title: hits[i].title, text });
   }
   return out;
+}
+
+// Split a gear list on top-level commas/semicolons only: a comma inside brackets
+// itemizes one item's contents ("ghost hunting kit (talcum powder, thermometer,
+// string)") and must not break it into separate items.
+function splitTopLevel(text: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let cur = "";
+  for (const ch of text) {
+    if (ch === "(" || ch === "[") depth++;
+    else if (ch === ")" || ch === "]") depth = Math.max(0, depth - 1);
+    if ((ch === "," || ch === ";") && depth === 0) {
+      parts.push(cur);
+      cur = "";
+    } else {
+      cur += ch;
+    }
+  }
+  parts.push(cur);
+  return parts;
+}
+
+// A pre-gen investigator's carried gear, printed as a comma-separated list under
+// a bare "Possessions" (Gateways) or "Equipment" (Doors) heading, e.g. "Notebook,
+// engraved fountain pen." or "Boxing gloves and gym kit, camera, $10 on hand."
+// Distinct from the "Treasured Possessions" background/ties section. Returns the
+// items as an array, or [] when absent.
+function parseItems(body: string): string[] {
+  const masked = maskParens(body);
+  // The gear heading is plural "Possessions" or "Equipment"; singular
+  // "Possession" is a rules word ("PSYCHIC ATTACKS AND POSSESSION"), not a list.
+  const re = /\b(?:Possessions|Equipment)\b/gi;
+  for (let m = re.exec(masked); m; m = re.exec(masked)) {
+    if (!isHeadingCase(m[0])) continue;
+    const before = masked.slice(Math.max(0, m.index - 16), m.index);
+    // "Treasured Possessions" is a background section, not a gear list.
+    if (/\bTreasured\s+$/i.test(before)) continue;
+    // Not a bulleted list mention bled in from appendix prose.
+    if (/[•·]\s*$/.test(before)) continue;
+
+    const rest = body.slice(m.index + m[0].length);
+    const maskedRest = maskParens(rest);
+    let end = nextSectionLabel(maskedRest);
+    // The gear list ends at a following scenario sub-heading, "Player Notes",
+    // or the first sentence break.
+    const stop = maskedRest
+      .slice(0, end)
+      .search(/\bPlayer\s+Notes?\b|\bRoleplaying\b|\.(?:\s|$)/i);
+    if (stop >= 0) end = stop;
+
+    let text = rest.slice(0, end).replace(/^[:•·\s]+/, "");
+    if (text.length > 200) {
+      const space = text.lastIndexOf(" ", 200);
+      text = text.slice(0, space > 0 ? space : 200);
+    }
+    const items = splitTopLevel(text)
+      // Normalise whitespace, then drop a trailing item's leading "and"
+      // ("matches, and four candles").
+      .map((s) => s.replace(/\s+/g, " ").trim().replace(/^and\s+/i, ""))
+      .filter((s) => /[A-Za-z0-9]/.test(s));
+    if (items.length) return items;
+  }
+  return [];
 }
 
 // Derive a creature name from its Sanity loss line, e.g. "1/1D6 Sanity points

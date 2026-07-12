@@ -107,15 +107,15 @@ const TIE_SECTIONS = new Set([
   "Treasured Possession",
 ]);
 
-// A real pre-gen investigator both records an age (players always do; NPC and
-// villain writeups usually don't) and fills in at least one "ties to the world"
-// section. Requiring both rejects Pulp villains (no age) and scenario NPCs whose
-// human stat block only carries a description + traits blurb (no ties section).
+// A real pre-gen investigator fills in at least one "ties to the world" section
+// AND is a fully realized playable character — it records an age and/or carries
+// a carried-gear list (from a bare "Possessions"/"Equipment" section; every
+// pregen in the sample has one, no NPC/villain does). The ties requirement
+// rejects scenario NPCs and villains built on a human stat block (a description +
+// traits blurb, or a stray equipment line, is not enough).
 function isInvestigator(character: CocCharacter): boolean {
-  return (
-    character.age != null &&
-    character.background.some((s) => TIE_SECTIONS.has(s.title))
-  );
+  const hasTies = character.background.some((s) => TIE_SECTIONS.has(s.title));
+  return hasTies && (character.age != null || character.items.length > 0);
 }
 
 // An investigator becomes a "character"; a Sanity loss line marks a Mythos
@@ -299,6 +299,12 @@ function buildItems(character: CocCharacter): any[] {
   // Spells.
   for (const name of character.spells) {
     items.push({ type: "spell", name, system: {} });
+  }
+
+  // Carried gear (a pre-gen's "Possessions"/"Equipment" list) -> generic item
+  // documents; the CoC7 "item" type defaults quantity to 1.
+  for (const name of character.items) {
+    items.push({ type: "item", name, system: {} });
   }
 
   return items;

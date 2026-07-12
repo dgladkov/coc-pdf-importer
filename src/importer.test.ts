@@ -36,6 +36,7 @@ function makeCharacter(over: Partial<CocCharacter> = {}): CocCharacter {
     sanityLoss: null,
     armor: null,
     background: [],
+    items: [],
     notes: [],
     ...over,
   };
@@ -251,6 +252,21 @@ describe("importCharacters — entity type", () => {
     ]);
   });
 
+  test("a pregen with no parsed age is still an Investigator via its gear list", async () => {
+    await importCharacters(
+      [
+        makeCharacter({
+          name: "Gearhead",
+          age: null,
+          items: ["notebook", "fountain pen"],
+          background: [{ title: "Treasured Possession", text: "a locket" }],
+        }),
+      ],
+      { notify: false },
+    );
+    assert.equal(created[0].type, "character");
+  });
+
   test("a background without an age or a ties section stays an NPC", async () => {
     // Scenario NPC / villain profile: a description + traits blurb but no age
     // and none of the investigator "ties to the world" sections.
@@ -392,6 +408,18 @@ describe("importCharacters — items", () => {
     assert.deepEqual(
       spells.map((s: any) => s.name),
       ["Cloud Memory", "Wither Limb"],
+    );
+  });
+
+  test("carried gear becomes generic item documents (quantity 1)", async () => {
+    await importCharacters(
+      [makeCharacter({ items: ["notebook", "ghost hunting kit (string, matches)"] })],
+      { notify: false },
+    );
+    const gear = created[0].items.filter((i: any) => i.type === "item");
+    assert.deepEqual(
+      gear.map((g: any) => g.name),
+      ["notebook", "ghost hunting kit (string, matches)"],
     );
   });
 
