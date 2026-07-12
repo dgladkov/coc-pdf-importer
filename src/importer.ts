@@ -92,10 +92,15 @@ async function importCharacter(
     system: buildActorSystem(character, type),
   });
 
-  const items = buildItems(character, indexes);
-  if (items.length) {
-    await actor.createEmbeddedDocuments("Item", items, { renderSheet: false });
+  const { base, customWeapons } = buildItems(character, indexes);
+  if (base.length) {
+    await actor.createEmbeddedDocuments("Item", base, { renderSheet: false });
   }
+  // Weapons not found in a compendium need a backing skill created and linked by
+  // id (the system can't resolve them, which pops a "select weapon skill" modal).
+  // Done after the base items so their skills — including ones the compendium
+  // weapons created — can be reused.
+  await attachCustomWeapons(actor, customWeapons, indexes);
 
   await applyDerivedOverrides(actor, character);
   return actor;
@@ -360,14 +365,26 @@ function setCocid(data: any, type: string): void {
   data.flags.CoC7.cocidFlag = { ...(data.flags.CoC7.cocidFlag ?? {}), id };
 }
 
-function buildItems(character: CocCharacter, indexes: CompendiumIndexes): any[] {
-  const items: any[] = [];
+// A "custom" weapon is one with no compendium match; its backing skill is
+// resolved and attached in a second pass (attachCustomWeapons).
+interface CustomWeapon {
+  weapon: any;
+  value: number | null;
+  ranged: boolean;
+}
+
+function buildItems(
+  character: CocCharacter,
+  indexes: CompendiumIndexes,
+): { base: any[]; customWeapons: CustomWeapon[] } {
+  const base: any[] = [];
+  const customWeapons: CustomWeapon[] = [];
   const skillNames = new Set<string>();
 
   const addSkill = (item: any) => {
     if (skillNames.has(item.name)) return;
     skillNames.add(item.name);
-    items.push(item);
+    base.push(item);
   };
 
   // Skills, with languages handled specially (own vs other; see languageItem).
@@ -387,88 +404,62 @@ function buildItems(character: CocCharacter, indexes: CompendiumIndexes): any[] 
     addSkill(languageItem(name, value, edu != null && value === edu, indexes.skill));
   }
 
-  // Combat: Dodge is a skill; everything else is a weapon backed by a skill.
+  // Combat: Dodge is a skill; a compendium weapon carries its own skill ref (add
+  // its backing skill here); anything else is a custom weapon resolved later.
   for (const attack of character.combat) {
     if (/^dodge$/i.test(attack.name)) {
       addSkill(skillItem("Dodge", attack.value ?? 0, {}, indexes.skill));
       continue;
     }
-    const { weapon, skills } = weaponFromAttack(attack, indexes);
-    for (const skill of skills) addSkill(skill);
-    items.push(weapon);
+    const found = findCompendiumItem(attack.name, indexes.weapon);
+    if (found) {
+      const weapon = structuredClone(found);
+      delete weapon._id;
+      const refs = [
+        { ref: weapon.system?.skill?.main?.name, value: attack.value ?? 0 },
+        { ref: weapon.system?.skill?.alternativ?.name, value: 0 },
+      ];
+      for (const { ref, value } of refs) {
+        const skill = ref ? skillFromRef(ref, value, indexes.skill) : null;
+        if (skill) addSkill(skill);
+      }
+      base.push(weapon);
+    } else {
+      const ranged = FIREARM_RE.test(attack.name);
+      customWeapons.push({
+        weapon: customWeaponData(attack, ranged),
+        value: attack.value,
+        ranged,
+      });
+    }
   }
 
   // Spells.
   for (const name of character.spells) {
-    items.push(spellItem(name, indexes.spell));
+    base.push(spellItem(name, indexes.spell));
   }
 
   // Carried gear (a pre-gen's "Possessions"/"Equipment" list) -> generic item
   // documents; the CoC7 "item" type defaults quantity to 1.
   for (const name of character.items) {
-    items.push({ type: "item", name, system: {} });
+    base.push({ type: "item", name, system: {} });
   }
 
-  return items;
+  return { base, customWeapons };
 }
 
 const FIREARM_RE =
   /\b(revolver|pistol|rifle|shotgun|gun|firearm|automatic|carbine|derringer|colt|luger|mauser|musket|needle|bow|sling)\b|\.\d{2}\b/i;
 
-function weaponFromAttack(
-  attack: CombatEntry,
-  indexes: CompendiumIndexes,
-): { weapon: any; skills: any[] } {
-  // Prefer the real compendium weapon: it carries the correct damage, range,
-  // malfunction, and backing-skill reference. Add the skill(s) it references
-  // (by CoCID), setting the main one's base to the attack's skill %.
-  const found = findCompendiumItem(attack.name, indexes.weapon);
-  if (found) {
-    const weapon = structuredClone(found);
-    delete weapon._id;
-    const skills: any[] = [];
-    const refs = [
-      { ref: weapon.system?.skill?.main?.name, value: attack.value ?? 0 },
-      { ref: weapon.system?.skill?.alternativ?.name, value: 0 },
-    ];
-    for (const { ref, value } of refs) {
-      const skill = ref ? skillFromRef(ref, value, indexes.skill) : null;
-      if (skill) skills.push(skill);
-    }
-    return { weapon, skills };
-  }
-
-  // Fallback: build the weapon and its backing skill from the parsed attack.
-  const ranged = FIREARM_RE.test(attack.name);
+// Weapon document for a custom (non-compendium) attack. Its backing skill is
+// filled in later by attachCustomWeapons (skill.main starts empty).
+function customWeaponData(attack: CombatEntry, ranged: boolean): any {
   const maneuver = /\bman(?:oeuv|euv)re?\b|\bmnvr\b/i.test(attack.name);
-  const spec = localize(
-    ranged
-      ? "CoC7.FirearmSpecializationName"
-      : "CoC7.FightingSpecializationName",
-    ranged ? "Firearms" : "Fighting",
-  );
-  const skillFullName = specName(spec, attack.name);
-
-  const skill =
-    attack.value != null
-      ? skillItem(
-          skillFullName,
-          attack.value,
-          {
-            special: true,
-            fighting: !ranged,
-            firearm: ranged,
-            ranged,
-          },
-          indexes.skill,
-        )
-      : null;
-
-  const weapon = {
+  return {
     name: attack.name,
     type: "weapon",
     system: {
-      skill: { main: { name: skill ? skillFullName : "", id: "" } },
+      skill: { main: { name: "", id: "" } },
       range: { normal: { value: "", damage: attack.damage ?? "" } },
       properties: { rngd: ranged, mnvr: maneuver },
       description: {
@@ -476,8 +467,84 @@ function weaponFromAttack(
       },
     },
   };
+}
 
-  return { weapon, skills: skill ? [skill] : [] };
+// Resolve and attach a backing skill to each custom weapon, then create them.
+// Algorithm (per the system's own weapon-skill behaviour):
+//   1. Reuse an already-present Fighting/Firearms skill whose value matches the
+//      weapon's — most likely the same underlying skill (e.g. a second handgun).
+//   2. Otherwise create a "Fighting (weapon)" / "Firearms (weapon)" skill (from
+//      the "(Any)" template) at the weapon's value, reusing it for later weapons.
+//   3. Link the weapon to that skill by id, so the sheet doesn't prompt.
+async function attachCustomWeapons(
+  actor: any,
+  customWeapons: CustomWeapon[],
+  indexes: CompendiumIndexes,
+): Promise<void> {
+  if (!customWeapons.length) return;
+
+  const specFor = (ranged: boolean) =>
+    localize(
+      ranged
+        ? "CoC7.FirearmSpecializationName"
+        : "CoC7.FightingSpecializationName",
+      ranged ? "Firearms" : "Fighting",
+    );
+  const specOf = (s: any) => s?.system?.specialization ?? "";
+  const baseOf = (s: any) =>
+    Number(s?.system?.adjustments?.base ?? s?.system?.base);
+
+  // Skills already on the actor after the base pass (includes any the compendium
+  // weapons created), plus new skills we create in this pass.
+  const existing = Array.from(actor.items ?? []).filter(
+    (i: any) => i.type === "skill",
+  );
+  const newSkills: any[] = [];
+  const resolved: { weapon: any; skill: any | null }[] = [];
+
+  for (const { weapon, value, ranged } of customWeapons) {
+    if (value == null) {
+      resolved.push({ weapon, skill: null });
+      continue;
+    }
+    const spec = specFor(ranged);
+    const v = Math.max(0, Math.round(value));
+    let skill =
+      existing.find((s: any) => specOf(s) === spec && baseOf(s) === v) ??
+      newSkills.find((s: any) => specOf(s) === spec && baseOf(s) === v);
+    if (!skill) {
+      skill = skillItem(
+        specName(spec, weapon.name),
+        v,
+        { special: true, fighting: !ranged, firearm: ranged, ranged },
+        indexes.skill,
+      );
+      newSkills.push(skill);
+    }
+    resolved.push({ weapon, skill });
+  }
+
+  const createdSkills = newSkills.length
+    ? ((await actor.createEmbeddedDocuments("Item", newSkills, {
+        renderSheet: false,
+      })) ?? [])
+    : [];
+  const createdByName = new Map(
+    createdSkills.map((d: any) => [d.name, d]),
+  );
+
+  const weapons = resolved.map(({ weapon, skill }) => {
+    if (skill) {
+      const doc = skill.id ?? skill._id ? skill : createdByName.get(skill.name);
+      if (doc)
+        weapon.system.skill.main = {
+          id: doc.id ?? doc._id ?? "",
+          name: doc.name,
+        };
+    }
+    return weapon;
+  });
+  await actor.createEmbeddedDocuments("Item", weapons, { renderSheet: false });
 }
 
 // Clone a compendium skill referenced by a weapon (by CoCID or name), setting its

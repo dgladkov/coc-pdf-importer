@@ -77,7 +77,14 @@ beforeEach(() => {
     create: async (d: any) => {
       const a: any = { id: "a" + ++n, ...d, items: [], updates: [], deleted: false };
       a.createEmbeddedDocuments = async (_type: string, docs: any[]) => {
-        a.items.push(...docs);
+        // Mirror Foundry: assign ids and return the created documents.
+        const withIds = docs.map((doc: any) => ({
+          ...doc,
+          _id: "it" + ++n,
+          id: "it" + n,
+        }));
+        a.items.push(...withIds);
+        return withIds;
       };
       a.update = async (u: any) => a.updates.push(u);
       a.delete = async () => (a.deleted = true);
@@ -401,6 +408,69 @@ describe("importCharacters — items", () => {
     );
   });
 
+  test("a custom weapon's backing skill is created and linked by id", async () => {
+    await importCharacters(
+      [makeCharacter({ combat: [attack("lightning gun", { value: 55, damage: "2D6" })] })],
+      { notify: false },
+    );
+    const a = created[0];
+    const weapon = a.items.find(
+      (i: any) => i.type === "weapon" && i.name === "lightning gun",
+    );
+    const skill = a.items.find(
+      (i: any) => i.type === "skill" && i.name === "Firearms (lightning gun)",
+    );
+    assert.ok(skill, "backing skill created");
+    assert.equal(skill.system.base, "55");
+    // Linked by id so the sheet does not pop a "select weapon skill" modal.
+    assert.equal(weapon.system.skill.main.id, skill.id);
+    assert.equal(weapon.system.skill.main.name, "Firearms (lightning gun)");
+  });
+
+  test("custom weapons with the same value and type share one skill", async () => {
+    await importCharacters(
+      [
+        makeCharacter({
+          combat: [
+            attack("lightning gun", { value: 50, damage: "2D6" }),
+            attack("plasma pistol", { value: 50, damage: "1D10" }),
+          ],
+        }),
+      ],
+      { notify: false },
+    );
+    const a = created[0];
+    const firearms = a.items.filter(
+      (i: any) => i.type === "skill" && i.system.specialization === "Firearms",
+    );
+    assert.equal(firearms.length, 1, "one shared firearms skill");
+    const weapons = a.items.filter((i: any) => i.type === "weapon");
+    assert.equal(weapons.length, 2);
+    for (const w of weapons)
+      assert.equal(w.system.skill.main.id, firearms[0].id);
+  });
+
+  test("a custom weapon reuses a matching skill already on the actor", async () => {
+    await importCharacters(
+      [
+        makeCharacter({
+          skills: { "Firearms (Handgun)": 45 },
+          combat: [attack("snubnose revolver", { value: 45, damage: "1D10" })],
+        }),
+      ],
+      { notify: false },
+    );
+    const a = created[0];
+    // No new firearms skill: the weapon reuses "Firearms (Handgun)".
+    const firearms = a.items.filter(
+      (i: any) => i.type === "skill" && i.system.specialization === "Firearms",
+    );
+    assert.equal(firearms.length, 1);
+    assert.equal(firearms[0].name, "Firearms (Handgun)");
+    const weapon = a.items.find((i: any) => i.type === "weapon");
+    assert.equal(weapon.system.skill.main.id, firearms[0].id);
+  });
+
   test("spells become spell items in order", async () => {
     await importCharacters(
       [makeCharacter({ spells: ["Cloud Memory", "Wither Limb"] })],
@@ -471,7 +541,7 @@ describe("importCharacters — compendium lookup", () => {
     const s = item(created[0], "Spot Hidden");
     assert.equal(s.img, "icons/spot.webp");
     assert.equal(s.system.base, "65"); // parsed value applied
-    assert.equal(s._id, undefined); // stripped so a new id is assigned
+    assert.notEqual(s._id, "abc"); // compendium _id stripped; a fresh id assigned
     assert.equal(s.flags.CoC7.cocidFlag.id, "i.skill.spot-hidden");
   });
 
