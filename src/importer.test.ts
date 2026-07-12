@@ -629,6 +629,61 @@ describe("importCharacters — items", () => {
     assert.equal(w("Rock").system.properties.ahdb, false);
   });
 
+  test("a thrown weapon uses the actor's Throw skill when the value matches", async () => {
+    await importCharacters(
+      [
+        makeCharacter({
+          skills: { Throw: 40 },
+          combat: [attack("Hatchet (thrown)", { value: 40, damage: "1D6+1" })],
+        }),
+      ],
+      { notify: false },
+    );
+    const a = created[0];
+    const thr = a.items.find((i: any) => i.type === "skill" && i.name === "Throw");
+    const weapon = a.items.find(
+      (i: any) => i.type === "weapon" && i.name === "Hatchet (thrown)",
+    );
+    assert.equal(weapon.system.skill.main.id, thr.id);
+    // No redundant per-weapon skill created.
+    assert.ok(!a.items.some((i: any) => /Hatchet/.test(i.name) && i.type === "skill"));
+  });
+
+  test("a thrown weapon creates a Throw skill when the actor lacks one", async () => {
+    await importCharacters(
+      [makeCharacter({ combat: [attack("Dart (thrown)", { value: 35, damage: "1D4" })] })],
+      { notify: false },
+    );
+    const a = created[0];
+    const thr = a.items.find((i: any) => i.type === "skill" && i.name === "Throw");
+    assert.ok(thr, "Throw skill created");
+    assert.equal(thr.system.base, "35");
+    const weapon = a.items.find((i: any) => i.type === "weapon" && i.name === "Dart (thrown)");
+    assert.equal(weapon.system.skill.main.id, thr.id);
+  });
+
+  test("a thrown weapon whose value differs from Throw gets its own skill", async () => {
+    await importCharacters(
+      [
+        makeCharacter({
+          skills: { Throw: 40 },
+          combat: [attack("War boomerang", { value: 25, damage: "1D8" })], // 25 != Throw 40
+        }),
+      ],
+      { notify: false },
+    );
+    const a = created[0];
+    const thr = a.items.find((i: any) => i.type === "skill" && i.name === "Throw");
+    const variant = a.items.find(
+      (i: any) => i.type === "skill" && i.name === "Fighting (War boomerang)",
+    );
+    assert.ok(variant, "per-weapon skill created for the value mismatch");
+    assert.equal(variant.system.base, "25");
+    const weapon = a.items.find((i: any) => i.type === "weapon" && i.name === "War boomerang");
+    assert.equal(weapon.system.skill.main.id, variant.id);
+    assert.notEqual(weapon.system.skill.main.id, thr.id);
+  });
+
   test("a melee weapon never matches a firearm entry (class-gated)", async () => {
     mockCompendium({ weapons: [weaponDoc(".38 or 9mm Revolver")] });
     await importCharacters(

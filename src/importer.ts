@@ -471,12 +471,21 @@ function matchWeapon(attack: CombatEntry, weaponIndex: ItemIndex): any | null {
   return null;
 }
 
-// A "custom" weapon is one with no compendium match; its backing skill is
-// resolved and attached in a second pass (attachCustomWeapons).
+// A weapon whose backing skill is resolved and attached in a second pass
+// (attachCustomWeapons): a custom weapon (no compendium match), or a thrown
+// compendium weapon (which should use the Throw skill, not its own).
 interface CustomWeapon {
   weapon: any;
   value: number | null;
   ranged: boolean;
+  thrown: boolean;
+}
+
+// A thrown weapon uses the Throw skill: recognised from the compendium weapon's
+// "thrown" flag, or the stat block naming it ("(thrown)", "throwing", boomerang).
+function isThrownAttack(attack: CombatEntry, matched: any | null): boolean {
+  if (matched?.system?.properties?.thrown) return true;
+  return /\(thrown\)|throwing|boomerang|shuriken|javelin/i.test(attack.name);
 }
 
 function buildItems(
@@ -510,15 +519,18 @@ function buildItems(
     addSkill(languageItem(name, value, edu != null && value === edu, indexes.skill));
   }
 
-  // Combat: Dodge is a skill; a compendium weapon carries its own skill ref (add
-  // its backing skill here); anything else is a custom weapon resolved later.
+  // Combat: Dodge is a skill; anything else becomes a weapon. A non-thrown
+  // compendium weapon is created now with its own backing skill; a thrown weapon
+  // (compendium or custom) and any other custom weapon has its skill resolved in
+  // the second pass, where a thrown weapon uses the actor's Throw skill.
   for (const attack of character.combat) {
     if (/^dodge$/i.test(attack.name)) {
       addSkill(skillItem("Dodge", attack.value ?? 0, {}, indexes.skill));
       continue;
     }
     const found = matchWeapon(attack, indexes.weapon);
-    if (found) {
+    const thrown = isThrownAttack(attack, found);
+    if (found && !thrown) {
       const weapon = structuredClone(found);
       delete weapon._id;
       // Keep the stat block's own name (so the keeper can cross-check against the
@@ -535,12 +547,20 @@ function buildItems(
       }
       base.push(weapon);
     } else {
-      const ranged = FIREARM_RE.test(attack.name);
-      customWeapons.push({
-        weapon: customWeaponData(attack, ranged, character.derived.DB),
-        value: attack.value,
-        ranged,
-      });
+      let weapon: any;
+      let ranged: boolean;
+      if (found) {
+        // Thrown compendium weapon: keep its stats and book name, but resolve the
+        // Throw skill later instead of its own (Fighting) skill.
+        weapon = structuredClone(found);
+        delete weapon._id;
+        weapon.name = attack.name;
+        ranged = !!weapon.system?.properties?.rngd;
+      } else {
+        ranged = FIREARM_RE.test(attack.name);
+        weapon = customWeaponData(attack, ranged, character.derived.DB);
+      }
+      customWeapons.push({ weapon, value: attack.value, ranged, thrown });
     }
   }
 
@@ -648,6 +668,8 @@ async function attachCustomWeapons(
       ranged ? "Firearms" : "Fighting",
     );
   const specOf = (s: any) => s?.system?.specialization ?? "";
+  const isThrow = (s: any) =>
+    (s?.system?.skillName ?? s?.name ?? "").toLowerCase() === "throw";
   const baseOf = (s: any) =>
     Number(s?.system?.adjustments?.base ?? s?.system?.base);
 
@@ -659,24 +681,40 @@ async function attachCustomWeapons(
   const newSkills: any[] = [];
   const resolved: { weapon: any; skill: any | null }[] = [];
 
-  for (const { weapon, value, ranged } of customWeapons) {
+  for (const { weapon, value, ranged, thrown } of customWeapons) {
     if (value == null) {
       resolved.push({ weapon, skill: null });
       continue;
     }
-    const spec = specFor(ranged);
     const v = Math.max(0, Math.round(value));
-    let skill =
-      existing.find((s: any) => specOf(s) === spec && baseOf(s) === v) ??
-      newSkills.find((s: any) => specOf(s) === spec && baseOf(s) === v);
+    let skill: any = null;
+
+    // A thrown weapon uses the actor's Throw skill — but only when its value
+    // matches (or no Throw skill exists yet). If a Throw skill is already present
+    // with a different value, fall through to a per-weapon Fighting skill.
+    if (thrown) {
+      const thr = existing.find(isThrow) ?? newSkills.find(isThrow);
+      if (thr && baseOf(thr) === v) skill = thr;
+      else if (!thr) {
+        skill = skillItem("Throw", v, {}, indexes.skill);
+        newSkills.push(skill);
+      }
+    }
+
     if (!skill) {
-      skill = skillItem(
-        specName(spec, weapon.name),
-        v,
-        { special: true, fighting: !ranged, firearm: ranged, ranged },
-        indexes.skill,
-      );
-      newSkills.push(skill);
+      const spec = specFor(ranged);
+      skill =
+        existing.find((s: any) => specOf(s) === spec && baseOf(s) === v) ??
+        newSkills.find((s: any) => specOf(s) === spec && baseOf(s) === v);
+      if (!skill) {
+        skill = skillItem(
+          specName(spec, weapon.name),
+          v,
+          { special: true, fighting: !ranged, firearm: ranged, ranged },
+          indexes.skill,
+        );
+        newSkills.push(skill);
+      }
     }
     resolved.push({ weapon, skill });
   }
