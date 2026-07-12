@@ -365,6 +365,112 @@ function setCocid(data: any, type: string): void {
   data.flags.CoC7.cocidFlag = { ...(data.flags.CoC7.cocidFlag ?? {}), id };
 }
 
+// ---------------------------------------------------------------------------
+// Weapon matching: stat blocks abbreviate weapon names ("​.38 revolver",
+// "12-g shotgun", "Knife"); map those to the canonical compendium item. Each
+// candidate lists the core (preferred) name first and a wiki (fallback) name
+// second, so matchWeapon resolves against whichever pack is installed, falling
+// back to a custom weapon when neither has it.
+// ---------------------------------------------------------------------------
+
+const KNIFE_BY_SIZE: Record<string, string[]> = {
+  Small: ["Knife, Small (switchblade, etc.)", "Knife, Small"],
+  Medium: ["Knife, Medium (carving knife, etc.)", "Knife, Medium"],
+  Large: ["Knife, Large (machete, etc.)", "Knife, Large"],
+};
+const CLUB_BY_SIZE: Record<string, string[]> = {
+  Small: ["Club, small (nightstick)", "Club, Small"],
+  Large: ["Club, large (baseball, cricket bat, poker)", "Club, Large"],
+};
+
+// Knives and clubs come in sizes the stat block only distinguishes by damage:
+// small club 1D6 / large club 1D8; small knife 1D4, medium 1D4+2, large 1D8.
+// The weapon's own damage is the *leading* term — a trailing damage bonus
+// ("+DB", or a die like "+1D6") is ignored by anchoring the checks at the start.
+function meleeCandidates(attack: CombatEntry): string[] {
+  const name = attack.name.toLowerCase();
+  const dmg = (attack.damage ?? "").toLowerCase().replace(/\s+/g, "");
+  if (/cosh|blackjack/.test(name))
+    return ["Blackjack (Cosh, life-preserver)", "Blackjack"];
+  if (/\bknife\b|\bdagger\b|switchblade|straight razor|\bmachete\b/.test(name)) {
+    const size = /^1d8\b/.test(dmg)
+      ? "Large"
+      : /^1d4\+2\b/.test(dmg)
+        ? "Medium"
+        : /^1d4\b/.test(dmg)
+          ? "Small"
+          : "Medium";
+    return KNIFE_BY_SIZE[size];
+  }
+  if (/\bclub\b|nightstick|truncheon|cudgel/.test(name)) {
+    const size = /^1d8\b/.test(dmg)
+      ? "Large"
+      : /^1d6\b/.test(dmg)
+        ? "Small"
+        : /nightstick/.test(name)
+          ? "Small"
+          : "Large";
+    return CLUB_BY_SIZE[size];
+  }
+  return [];
+}
+
+// Name-pattern aliases for firearms (and the Thompson). "handgun" rules do not
+// apply to rifle names (".45 Martini-Henry Rifle" is not a .45 pistol).
+const WEAPON_ALIASES: {
+  re: RegExp;
+  names: string[];
+  handgun?: boolean;
+}[] = [
+  { re: /\bthompson\b/i, names: ["Thompson (50 mag)", "Thompson"] },
+  // handgun automatics (before the caliber default)
+  { re: /\.45\b.*\b(auto|automatic|pistol)\b/i, names: [".45 Automatic"], handgun: true },
+  { re: /\.38\b.*\b(auto|automatic|pistol)\b/i, names: [".38 Automatic"], handgun: true },
+  { re: /\.32\b.*\b(auto|automatic|pistol)\b/i, names: [".32 or 7.65mm Automatic"], handgun: true },
+  { re: /\.22\b.*\b(auto|automatic)\b/i, names: [".22 Short Automatic"], handgun: true },
+  // handgun revolvers / caliber defaults
+  { re: /\.45\b.*revolver/i, names: [".45 Revolver"], handgun: true },
+  { re: /\.45\b/i, names: [".45 Automatic"], handgun: true },
+  { re: /\.38\b/i, names: [".38 or 9mm Revolver"], handgun: true },
+  { re: /\.32\b/i, names: [".32 or 7.65mm Revolver"], handgun: true },
+  { re: /\.357\b/i, names: [".357 Magnum Revolver"], handgun: true },
+  { re: /\.44\b/i, names: [".44 Magnum Revolver"], handgun: true },
+  { re: /\.41\b/i, names: [".41 Revolver"], handgun: true },
+  { re: /\.25\b.*derringer/i, names: [".25 Derringer (1B)"], handgun: true },
+  // rifles
+  { re: /\.30-06\b/i, names: [".30-06 Bolt-Action Rifle"] },
+  { re: /\.303\b/i, names: [".303 Lee-Enfield"] },
+  // shotguns
+  { re: /\b12[\s-]?(?:g|ga|gauge|gage)\b/i, names: ["12-gauge Shotgun (2B)"] },
+  { re: /\b20[\s-]?(?:g|ga|gauge|gage)\b/i, names: ["20-gauge Shotgun (2B)"] },
+];
+
+const RIFLE_RE =
+  /\b(rifle|carbine|enfield|springfield|garand|mauser|winchester|musket)\b|-action\b/i;
+
+// Ordered candidate canonical names for an attack: exact name, damage-based melee
+// size, then firearm aliases (core name before its wiki fallback within each).
+function weaponCandidates(attack: CombatEntry): string[] {
+  const out: string[] = [attack.name];
+  out.push(...meleeCandidates(attack));
+  const isRifle = RIFLE_RE.test(attack.name);
+  for (const rule of WEAPON_ALIASES) {
+    if (rule.handgun && isRifle) continue;
+    if (rule.re.test(attack.name)) out.push(...rule.names);
+  }
+  return out;
+}
+
+// Resolve an attack to a compendium weapon: the first candidate present in the
+// weapon index wins (core preferred, wiki fallback). Null -> a custom weapon.
+function matchWeapon(attack: CombatEntry, weaponIndex: ItemIndex): any | null {
+  for (const cand of weaponCandidates(attack)) {
+    const hit = weaponIndex.get(cand.toLowerCase());
+    if (hit) return hit;
+  }
+  return null;
+}
+
 // A "custom" weapon is one with no compendium match; its backing skill is
 // resolved and attached in a second pass (attachCustomWeapons).
 interface CustomWeapon {
@@ -411,7 +517,7 @@ function buildItems(
       addSkill(skillItem("Dodge", attack.value ?? 0, {}, indexes.skill));
       continue;
     }
-    const found = findCompendiumItem(attack.name, indexes.weapon);
+    const found = matchWeapon(attack, indexes.weapon);
     if (found) {
       const weapon = structuredClone(found);
       delete weapon._id;

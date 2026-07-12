@@ -21,6 +21,27 @@ function attack(name: string, over: Partial<CombatEntry> = {}): CombatEntry {
   return { name, value: 40, half: 20, fifth: 8, damage: "1D4", note: null, ...over };
 }
 
+// A minimal compendium weapon document with the given canonical name.
+function weaponDoc(name: string): any {
+  return {
+    name,
+    type: "weapon",
+    img: "weapon.svg",
+    system: {
+      skill: { main: { name: "Firearms (Handgun)" } },
+      range: { normal: { damage: "1D10" } },
+      properties: { rngd: true },
+    },
+    flags: {
+      CoC7: {
+        cocidFlag: {
+          id: "i.weapon." + name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+        },
+      },
+    },
+  };
+}
+
 function makeCharacter(over: Partial<CocCharacter> = {}): CocCharacter {
   return {
     name: "Test Subject",
@@ -469,6 +490,106 @@ describe("importCharacters — items", () => {
     assert.equal(firearms[0].name, "Firearms (Handgun)");
     const weapon = a.items.find((i: any) => i.type === "weapon");
     assert.equal(weapon.system.skill.main.id, firearms[0].id);
+  });
+
+  test("an abbreviated firearm matches the canonical compendium weapon", async () => {
+    mockCompendium({
+      weapons: [
+        weaponDoc(".38 or 9mm Revolver"),
+        weaponDoc(".45 Automatic"),
+        weaponDoc("12-gauge Shotgun (2B)"),
+      ],
+    });
+    await importCharacters(
+      [
+        makeCharacter({
+          combat: [
+            attack(".38 revolver", { value: 45, damage: "1D10" }),
+            attack(".45 auto", { value: 40, damage: "1D10+2" }),
+            attack("12-g shotgun", { value: 40, damage: "4D6/2D6/1D6" }),
+          ],
+        }),
+      ],
+      { notify: false },
+    );
+    const names = created[0].items
+      .filter((i: any) => i.type === "weapon")
+      .map((w: any) => w.name);
+    assert.deepEqual(names.sort(), [
+      ".38 or 9mm Revolver",
+      ".45 Automatic",
+      "12-gauge Shotgun (2B)",
+    ]);
+  });
+
+  test("Thompson prefers the core 50-mag weapon, then the wiki fallback", async () => {
+    mockCompendium({ weapons: [weaponDoc("Thompson (50 mag)"), weaponDoc("Thompson")] });
+    await importCharacters(
+      [makeCharacter({ combat: [attack("Thompson SMG", { value: 45, damage: "1D10+2" })] })],
+      { notify: false },
+    );
+    assert.ok(
+      created[0].items.some((i: any) => i.name === "Thompson (50 mag)"),
+      "core preferred",
+    );
+
+    created.length = 0;
+    mockCompendium({ weapons: [weaponDoc("Thompson")] }); // only the wiki pack
+    await importCharacters(
+      [makeCharacter({ combat: [attack("Thompson submachine gun", { value: 45, damage: "1D10+2" })] })],
+      { notify: false },
+    );
+    assert.ok(
+      created[0].items.some((i: any) => i.name === "Thompson"),
+      "wiki fallback",
+    );
+  });
+
+  test("knife/club size is deduced from damage, ignoring the damage bonus", async () => {
+    mockCompendium({
+      weapons: [
+        weaponDoc("Knife, Small (switchblade, etc.)"),
+        weaponDoc("Knife, Medium (carving knife, etc.)"),
+        weaponDoc("Knife, Large (machete, etc.)"),
+        weaponDoc("Club, small (nightstick)"),
+        weaponDoc("Club, large (baseball, cricket bat, poker)"),
+      ],
+    });
+    await importCharacters(
+      [
+        makeCharacter({
+          combat: [
+            attack("Knife", { value: 40, damage: "1D4+1D6" }), // small (DB die ignored)
+            attack("Kitchen knife", { value: 40, damage: "1D4+2+DB" }), // medium
+            attack("Hunting knife", { value: 40, damage: "1D8+1D4" }), // large
+            attack("Club", { value: 40, damage: "1D6+1D4" }), // small
+            attack("Club", { value: 40, damage: "1D8+1" }), // large
+          ],
+        }),
+      ],
+      { notify: false },
+    );
+    const names = created[0].items
+      .filter((i: any) => i.type === "weapon")
+      .map((w: any) => w.name);
+    assert.ok(names.includes("Knife, Small (switchblade, etc.)"));
+    assert.ok(names.includes("Knife, Medium (carving knife, etc.)"));
+    assert.ok(names.includes("Knife, Large (machete, etc.)"));
+    assert.ok(names.includes("Club, small (nightstick)"));
+    assert.ok(names.includes("Club, large (baseball, cricket bat, poker)"));
+  });
+
+  test("a melee weapon never matches a firearm entry (class-gated)", async () => {
+    mockCompendium({ weapons: [weaponDoc(".38 or 9mm Revolver")] });
+    await importCharacters(
+      [makeCharacter({ combat: [attack("Short sword", { value: 40, damage: "1D8" })] })],
+      { notify: false },
+    );
+    // No compendium match -> a custom weapon named "Short sword".
+    assert.ok(
+      created[0].items.some((i: any) => i.type === "weapon" && i.name === "Short sword"),
+    );
+    assert.ok(!created[0].items.some((i: any) => i.name === ".38 or 9mm Revolver"));
   });
 
   test("spells become spell items in order", async () => {
