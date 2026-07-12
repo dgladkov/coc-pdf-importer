@@ -788,6 +788,56 @@ describe("parseCocCharacters (unit)", () => {
     assert.deepEqual(c.spells, ["Dominate (variant)"]);
   });
 
+  // A pre-gen investigator carries background sections; each is captured under
+  // its heading, and the list that precedes them is not swallowed by the prose.
+  test("investigator background sections are parsed", () => {
+    const [c] = parseCocCharacters(
+      "Sleuth, private eye STR 50 CON 50 SIZ 50 DEX 50 INT 70 APP 60 POW 60 EDU 75 SAN 55 HP 10 " +
+        "DB: 0 Build: 0 Move: 8 " +
+        "Skills: Spot Hidden 60%, Library Use 50%. " +
+        "Personal Description: A tall, weathered figure. " +
+        "Ideology and Beliefs: The truth will out. " +
+        "Traits: Relentless once on a case.",
+    );
+    assert.deepEqual(
+      c.background.map((s) => s.title),
+      ["Personal Description", "Ideology and Beliefs", "Traits"],
+    );
+    assert.equal(c.background[0].text, "A tall, weathered figure");
+    assert.equal(c.background[2].text, "Relentless once on a case");
+    // The Skills list is not swallowed by the background prose that follows it.
+    assert.equal(c.skills["Spot Hidden"], 60);
+  });
+
+  // Some sheets head the description block with a bare "Description" (as the
+  // Dhole House importer does); it still maps to the Personal Description section.
+  test('a bare "Description" heading maps to Personal Description', () => {
+    const [c] = parseCocCharacters(
+      "Scholar, retired STR 40 CON 45 SIZ 55 DEX 45 INT 80 APP 55 POW 65 EDU 85 SAN 60 HP 10 " +
+        "DB: 0 Build: 0 Move: 7 " +
+        "Description: A stooped man with ink-stained fingers. " +
+        "Traits: Meticulous to a fault.",
+    );
+    assert.deepEqual(
+      c.background.map((s) => s.title),
+      ["Personal Description", "Traits"],
+    );
+    assert.equal(c.background[0].text, "A stooped man with ink-stained fingers");
+  });
+
+  // A monster's unbounded body can bleed into rules prose mentioning a heading
+  // word; without the human characteristics (APP/EDU) an investigator sheet
+  // requires, that is not a background.
+  test("a creature without APP/EDU gets no background from prose bleed", () => {
+    const [c] = parseCocCharacters(
+      "Horror, foul STR 90 CON 90 SIZ 120 DEX 40 INT 50 APP - POW 80 EDU - SAN - HP 21 " +
+        "DB: +1D6 Build: 2 Move: 8 " +
+        "Sanity Loss: 1/1D8 Sanity points to see it. " +
+        "Significant People: madness-table prose mentioning a Significant Person.",
+    );
+    assert.deepEqual(c.background, []);
+  });
+
   // An auto-hit attack reads "automatic" where a skill % would sit and may carry
   // a non-dice damage ("Energy Blast automatic, damage, 20 points").
   test("an auto-hit attack with a non-dice damage is captured", () => {

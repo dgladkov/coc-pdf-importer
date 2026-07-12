@@ -1,8 +1,14 @@
-import type { CocCharacter, CombatEntry } from "./process.ts";
+import type {
+  BackgroundSection,
+  CocCharacter,
+  CombatEntry,
+} from "./process.ts";
 
 // Foundry globals (game, ui, Actor, Folder) are declared in ./foundry.d.ts.
 
-type EntityType = "npc" | "creature";
+// "character" is a full Investigator; "npc" a plain NPC; "creature" a Mythos
+// monster. Pre-gen investigators (with a background block) import as "character".
+type EntityType = "npc" | "creature" | "character";
 
 export interface ImportOptions {
   /** Force the actor type, or 'auto' to guess from the stat block. */
@@ -76,7 +82,7 @@ async function importCharacter(
     name: character.name || "Unknown",
     type,
     folder: folder?.id ?? null,
-    system: buildActorSystem(character),
+    system: buildActorSystem(character, type),
   });
 
   const items = buildItems(character);
@@ -92,19 +98,46 @@ async function importCharacter(
 // Entity type / actor system data
 // ---------------------------------------------------------------------------
 
-// A Sanity loss line is the mark of a Mythos creature; everyone else is an NPC.
+// The background sections that bind a playable investigator to the world. A
+// pre-gen player character fills these in; scenario NPCs and Pulp villains built
+// on the same human stat block get at most a description + traits blurb.
+const TIE_SECTIONS = new Set([
+  "Significant People",
+  "Meaningful Locations",
+  "Treasured Possession",
+]);
+
+// A real pre-gen investigator both records an age (players always do; NPC and
+// villain writeups usually don't) and fills in at least one "ties to the world"
+// section. Requiring both rejects Pulp villains (no age) and scenario NPCs whose
+// human stat block only carries a description + traits blurb (no ties section).
+function isInvestigator(character: CocCharacter): boolean {
+  return (
+    character.age != null &&
+    character.background.some((s) => TIE_SECTIONS.has(s.title))
+  );
+}
+
+// An investigator becomes a "character"; a Sanity loss line marks a Mythos
+// creature; everyone else is an NPC.
 function guessEntityType(character: CocCharacter): EntityType {
+  if (isInvestigator(character)) return "character";
   return character.sanityLoss ? "creature" : "npc";
 }
 
-function buildActorSystem(character: CocCharacter): Record<string, unknown> {
+function buildActorSystem(
+  character: CocCharacter,
+  type: EntityType,
+): Record<string, unknown> {
   const system: any = {
     characteristics: {},
     attribs: {},
     infos: {},
-    special: {},
-    description: { keeper: notesToHtml(character) },
+    description: { keeper: notesToHtml(character, type) },
   };
+  // "special" (sanLoss / attacksPerRound) exists on npc/creature only, not on the
+  // Investigator "character" type.
+  if (type !== "character") system.special = {};
 
   // STR/CON/SIZ/DEX/INT/APP/POW/EDU are characteristics; SAN/HP are attribs.
   const charMap: Record<string, string> = {
@@ -142,15 +175,39 @@ function buildActorSystem(character: CocCharacter): Record<string, unknown> {
   if (character.age != null) system.infos.age = String(character.age);
   if (character.description) system.infos.occupation = character.description;
 
-  const sanLoss = parseSanLoss(character.sanityLoss);
-  if (sanLoss) system.special.sanLoss = sanLoss;
-  const apr = parseAttacksPerRound(character.attacksPerRound);
-  if (apr != null) system.special.attacksPerRound = apr;
+  if (system.special) {
+    const sanLoss = parseSanLoss(character.sanityLoss);
+    if (sanLoss) system.special.sanLoss = sanLoss;
+    const apr = parseAttacksPerRound(character.attacksPerRound);
+    if (apr != null) system.special.attacksPerRound = apr;
+  }
 
   const armor = armorAttrib(character.armor);
   if (armor) system.attribs.armor = armor;
 
+  // Investigator background -> the character sheet's backstory (a single HTML
+  // block) and biography (per-section {title, value} rows the sheet renders).
+  if (type === "character" && character.background.length) {
+    system.backstory = backstoryHtml(character.background);
+    system.biography = character.background.map((s) => ({
+      title: s.title,
+      value: `<p>${escapeHtml(s.text)}</p>`,
+    }));
+  }
+
   return system;
+}
+
+// Combine the background sections into the single HTML block stored in
+// system.backstory, matching the layout the CoC7 Dhole House importer produces.
+function backstoryHtml(sections: BackgroundSection[]): string {
+  const block = sections
+    .map(
+      (s) =>
+        `<h3>${escapeHtml(s.title)}</h3>\n<div>\n${escapeHtml(s.text)}\n</div>`,
+    )
+    .join("\n");
+  return `<h2>Backstory</h2>\n${block}`;
 }
 
 // Map a parsed armor descriptor to the CoC7 armor attrib: the leading "N-point"
@@ -391,14 +448,21 @@ function parseAttacksPerRound(value: string | null): number | null {
   return match ? Number(match[0]) : null;
 }
 
-function notesToHtml(character: CocCharacter): string {
+function notesToHtml(character: CocCharacter, type: EntityType): string {
   const parts: string[] = [];
   if (character.sanityLoss) parts.push(`Sanity loss: ${character.sanityLoss}`);
   for (const note of character.notes) parts.push(note);
-  return parts
+  let html = parts
     .filter(Boolean)
     .map((p) => `<p>${escapeHtml(p)}</p>`)
     .join("");
+  // A non-investigator (NPC/creature) has no backstory/biography on its sheet,
+  // so its background sections would otherwise be dropped. Keep them in the
+  // Keeper notes instead. (Investigators get them as backstory/biography.)
+  if (type !== "character" && character.background.length) {
+    html += backstoryHtml(character.background);
+  }
+  return html;
 }
 
 function escapeHtml(text: string): string {

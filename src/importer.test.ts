@@ -35,6 +35,7 @@ function makeCharacter(over: Partial<CocCharacter> = {}): CocCharacter {
     spells: [],
     sanityLoss: null,
     armor: null,
+    background: [],
     notes: [],
     ...over,
   };
@@ -221,6 +222,60 @@ describe("importCharacters — entity type", () => {
     );
     assert.equal(created.find((a) => a.name === "Human").type, "npc");
     assert.equal(created.find((a) => a.name === "Monster").type, "creature");
+  });
+
+  test("a background block makes the actor an Investigator (character)", async () => {
+    await importCharacters(
+      [
+        makeCharacter({
+          name: "Sleuth",
+          age: 40,
+          background: [
+            { title: "Traits", text: "Curious & stubborn." },
+            { title: "Significant People", text: "Justice above all." },
+          ],
+        }),
+      ],
+      { notify: false },
+    );
+    const a = created[0];
+    assert.equal(a.type, "character");
+    // The Investigator sheet has no npc-style "special" block.
+    assert.equal(a.system.special, undefined);
+    // Backstory HTML block + per-section biography rows (escaped).
+    assert.match(a.system.backstory, /<h3>Traits<\/h3>/);
+    assert.match(a.system.backstory, /Curious &amp; stubborn\./);
+    assert.deepEqual(a.system.biography, [
+      { title: "Traits", value: "<p>Curious &amp; stubborn.</p>" },
+      { title: "Significant People", value: "<p>Justice above all.</p>" },
+    ]);
+  });
+
+  test("a background without an age or a ties section stays an NPC", async () => {
+    // Scenario NPC / villain profile: a description + traits blurb but no age
+    // and none of the investigator "ties to the world" sections.
+    await importCharacters(
+      [
+        makeCharacter({
+          name: "Villain",
+          age: null,
+          background: [
+            { title: "Personal Description", text: "Tall, gaunt, cold-eyed." },
+            { title: "Traits", text: "Ruthless." },
+          ],
+        }),
+      ],
+      { notify: false },
+    );
+    const a = created[0];
+    assert.equal(a.type, "npc");
+    // Not an investigator sheet: no backstory/biography...
+    assert.equal(a.system.backstory, undefined);
+    assert.equal(a.system.biography, undefined);
+    // ...but the background sections are kept in the Keeper notes.
+    assert.match(a.system.description.keeper, /<h3>Personal Description<\/h3>/);
+    assert.match(a.system.description.keeper, /Tall, gaunt, cold-eyed\./);
+    assert.match(a.system.description.keeper, /<h3>Traits<\/h3>/);
   });
 
   test("an explicit entity option overrides the guess", async () => {

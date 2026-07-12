@@ -32,6 +32,23 @@ const SECTION_LABELS = [
   "Sanity Loss",
   "Notes",
   "Powers",
+  // Pre-gen investigator background headings. Listed here so they bound the
+  // sections above them (e.g. a "Skills" list does not bleed into the prose that
+  // follows) and terminate the stat header. parseBackground extracts their text.
+  "Personal Description",
+  "Description",
+  "Ideology and Beliefs",
+  "Significant People",
+  "Meaningful Locations",
+  "Treasured Possession",
+  "Traits",
+  "Injuries & Scars",
+  "Injuries and Scars",
+  "Phobias & Manias",
+  "Phobias and Manias",
+  "Arcane Tomes",
+  "Encounters with Strange Entities",
+  "Fellow Investigators",
 ];
 
 export interface CharacteristicValue {
@@ -63,6 +80,14 @@ export interface CombatEntry {
 
 export type Skills = Record<string, number>;
 
+// A pre-generated investigator background block ("Personal Description",
+// "Ideology and Beliefs", ...). The presence of one or more of these marks the
+// actor as an Investigator (Foundry "character") rather than an NPC/creature.
+export interface BackgroundSection {
+  title: string;
+  text: string;
+}
+
 // A run of extracted text at a single font size, with its offsets into the
 // concatenated document text.
 interface TextChunk {
@@ -86,6 +111,7 @@ export interface CocCharacter {
   spells: string[];
   sanityLoss: string | null; // present for monsters, null for ordinary NPCs
   armor: string | null; // e.g. "3-point fur and gristle", "none"; null when absent
+  background: BackgroundSection[]; // extracted background sections (may also appear on NPC/villain human stat blocks); the importer decides investigator typing
   notes: string[];
 }
 
@@ -777,6 +803,17 @@ function parseBlock(
   );
   const sanityLoss = parseSanityLoss(body) || parseSanityLoss(sharedTail);
   const armor = parseArmor(body) || parseArmor(sharedTail);
+  // Background sections mark a real investigator only when the block carries the
+  // human characteristics an investigator sheet requires (APP and EDU). Monsters
+  // and animals leave these as "—"; when such a creature's unbounded body bleeds
+  // into rules/scenario prose that happens to contain a heading word, that is a
+  // false hit, not a background.
+  const col0 = characteristicsForColumn(cols, 0);
+  let background: BackgroundSection[] = [];
+  if (col0.APP?.value != null && col0.EDU?.value != null) {
+    background = parseBackground(body);
+    if (!background.length) background = parseBackground(sharedTail);
+  }
   const note = parseNoteBeforeCombat(body);
   const notes = note ? [note] : [];
 
@@ -803,6 +840,7 @@ function parseBlock(
         spells,
         sanityLoss,
         armor,
+        background,
         notes,
       },
     ];
@@ -859,6 +897,7 @@ function parseBlock(
       spells,
       sanityLoss,
       armor,
+      background,
       notes,
     });
   }
@@ -1494,6 +1533,71 @@ function parseArmor(body: string): string | null {
   if (open > (value.match(/\)/g) ?? []).length)
     value = clean(value.slice(0, value.lastIndexOf("(")));
   return value || null;
+}
+
+// The pre-gen investigator background headings, each with the heading forms seen
+// in print (plural, "and" vs "&" vs "/"). Order here is the canonical print
+// order; parseBackground re-sorts by where each heading actually appears.
+const BACKGROUND_SECTIONS: { title: string; re: RegExp }[] = [
+  { title: "Personal Description", re: /\b(?:Personal\s+)?Description\b/gi },
+  {
+    title: "Ideology and Beliefs",
+    re: /\bIdeology(?:\s*(?:and|&|\/)\s*Beliefs?)?\b/gi,
+  },
+  { title: "Significant People", re: /\bSignificant\s+People\b/gi },
+  { title: "Meaningful Locations", re: /\bMeaningful\s+Locations?\b/gi },
+  { title: "Treasured Possession", re: /\bTreasured\s+Possessions?\b/gi },
+  { title: "Traits", re: /\bTraits\b/gi },
+  { title: "Injuries & Scars", re: /\bInjuries\s*(?:&|and)\s*Scars\b/gi },
+  { title: "Phobias & Manias", re: /\bPhobias\s*(?:&|and)\s*Manias\b/gi },
+  {
+    title: "Arcane Tomes, Spells & Artifacts",
+    re: /\bArcane\s+Tomes\b(?:[,\s]+Spells)?(?:\s*(?:&|and)\s*Artifacts?)?/gi,
+  },
+  {
+    title: "Encounters with Strange Entities",
+    re: /\bEncounters\s+with\s+Strange\s+Entities\b/gi,
+  },
+  { title: "Fellow Investigators", re: /\bFellow\s+Investigators?\b/gi },
+];
+
+// Extract the investigator background sections from a block body. Each section
+// runs from its heading to the next background heading, or — for the last one —
+// to the next stat/section label (nextSectionLabel) or the end of the body.
+// Returns [] for ordinary NPCs/creatures (no such headings).
+function parseBackground(body: string): BackgroundSection[] {
+  const masked = maskParens(body);
+  const hits: { title: string; start: number; end: number }[] = [];
+  for (const { title, re } of BACKGROUND_SECTIONS) {
+    re.lastIndex = 0;
+    for (let m = re.exec(masked); m; m = re.exec(masked)) {
+      // Only a capitalised heading, never a lowercase prose mention.
+      if (!isHeadingCase(m[0])) continue;
+      hits.push({ title, start: m.index, end: m.index + m[0].length });
+      break; // first heading occurrence only
+    }
+  }
+  if (!hits.length) return [];
+  hits.sort((a, b) => a.start - b.start);
+
+  const out: BackgroundSection[] = [];
+  for (let i = 0; i < hits.length; i++) {
+    const textStart = hits[i].end;
+    // Bound at the next background heading (from its actual position, robust to
+    // print variants) or the next core section label, whichever comes first.
+    const nextBg = i + 1 < hits.length ? hits[i + 1].start : masked.length;
+    const rest = body.slice(textStart);
+    const core = textStart + nextSectionLabel(maskParens(rest));
+    // Drop bullet markers (these sheets separate the fill-in prompts with "•")
+    // and a leading colon ("Personal Description: ...").
+    const text = clean(
+      body.slice(textStart, Math.min(nextBg, core)).replace(/[•·●⁃|]/g, " "),
+    ).replace(/^:\s*/, "");
+    // Skip a heading whose body is just a bullet or blank (a two-column sheet
+    // stacks the headings with their fill-in text in a separate column).
+    if (/[A-Za-z]/.test(text)) out.push({ title: hits[i].title, text });
+  }
+  return out;
 }
 
 // Derive a creature name from its Sanity loss line, e.g. "1/1D6 Sanity points
