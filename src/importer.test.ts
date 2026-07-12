@@ -616,6 +616,59 @@ describe("importCharacters — compendium lookup", () => {
     assert.equal(skill.flags.CoC7.cocidFlag.id, "i.skill.fighting-brawl");
   });
 
+  test("a compendium weapon whose skill doesn't exist creates that exact named skill", async () => {
+    // The weapon references "Firearms (Lightning Gun)" by name, but only the
+    // generic "Firearms (Any)" template exists. We must create the exact skill,
+    // not fold it into "(Any)" (which would prompt for a specialization).
+    mockCompendium({
+      skills: [
+        {
+          name: "Firearms (Any)",
+          type: "skill",
+          img: "firearms.svg",
+          system: {
+            skillName: "Any",
+            specialization: "Firearms",
+            base: "1",
+            properties: { special: true, requiresname: true },
+          },
+          flags: { CoC7: { cocidFlag: { id: "i.skill.firearms-any" } } },
+        },
+      ],
+      weapons: [
+        {
+          name: "Lightning Gun",
+          type: "weapon",
+          img: "lg.svg",
+          system: {
+            skill: { main: { name: "Firearms (Lightning Gun)" } },
+            range: { normal: { damage: "1D10" } },
+            properties: { rngd: true },
+          },
+          flags: { CoC7: { cocidFlag: { id: "i.weapon.lightning-gun" } } },
+        },
+      ],
+    });
+    await importCharacters(
+      [makeCharacter({ combat: [attack("Lightning Gun", { value: 40, damage: "1D10" })] })],
+      { notify: false },
+    );
+    const a = created[0];
+    assert.ok(
+      a.items.find((i: any) => i.type === "weapon" && i.name === "Lightning Gun"),
+    );
+    const skill = a.items.find(
+      (i: any) => i.type === "skill" && i.name === "Firearms (Lightning Gun)",
+    );
+    assert.ok(skill, "exact named skill created");
+    assert.equal(skill.system.skillName, "Lightning Gun"); // not "Any"
+    assert.equal(skill.system.base, "40");
+    // No generic "(Any)" skill was added (which would pop the dialog).
+    assert.ok(
+      !a.items.some((i: any) => i.type === "skill" && i.name === "Firearms (Any)"),
+    );
+  });
+
   test("a matched spell is cloned and CoCID-stamped", async () => {
     mockCompendium({
       spells: [

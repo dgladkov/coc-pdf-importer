@@ -415,12 +415,13 @@ function buildItems(
     if (found) {
       const weapon = structuredClone(found);
       delete weapon._id;
+      const ranged = !!weapon.system?.properties?.rngd;
       const refs = [
         { ref: weapon.system?.skill?.main?.name, value: attack.value ?? 0 },
         { ref: weapon.system?.skill?.alternativ?.name, value: 0 },
       ];
       for (const { ref, value } of refs) {
-        const skill = ref ? skillFromRef(ref, value, indexes.skill) : null;
+        const skill = ref ? weaponSkillItem(ref, value, ranged, indexes.skill) : null;
         if (skill) addSkill(skill);
       }
       base.push(weapon);
@@ -545,6 +546,27 @@ async function attachCustomWeapons(
     return weapon;
   });
   await actor.createEmbeddedDocuments("Item", weapons, { renderSheet: false });
+}
+
+// Resolve the backing skill a compendium weapon references. A CoCID reference is
+// cloned from the exact skill it names. A plain skill *name* is cloned if it
+// exists, otherwise built as a concrete named skill from the "(Any)" template —
+// so a weapon whose skill ("Firearms (Lightning Gun)") doesn't exist in the world
+// still gets that exact skill attached, instead of the system folding it into
+// "(Any)" and prompting for a specialization.
+function weaponSkillItem(
+  ref: string,
+  value: number,
+  ranged: boolean,
+  skillIndex: ItemIndex,
+): any | null {
+  if (/^i\.skill\./i.test(ref)) return skillFromRef(ref, value, skillIndex);
+  return skillItem(
+    ref,
+    value,
+    { special: true, fighting: !ranged, firearm: ranged, ranged },
+    skillIndex,
+  );
 }
 
 // Clone a compendium skill referenced by a weapon (by CoCID or name), setting its
