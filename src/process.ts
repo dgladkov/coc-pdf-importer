@@ -106,8 +106,7 @@ export interface CocCharacter {
   derived: DerivedStats;
   attacksPerRound: string | null;
   combat: CombatEntry[];
-  skills: Skills;
-  languages: Skills;
+  skills: Skills; // includes languages, named "Language (X)" (see mergeLanguages)
   spells: string[];
   sanityLoss: string | null; // present for monsters, null for ordinary NPCs
   armor: string | null; // e.g. "3-point fur and gristle", "none"; null when absent
@@ -758,6 +757,7 @@ function parseBlock(
   // Rewrite spelled-out derived labels here (done per block so global text
   // offsets used for name detection stay stable).
   body = normalizeLabels(body);
+  body = expandLanguageList(body);
 
   // Drop a name recovered from an "average / rolls" column-header row.
   if (isFurnitureName(name)) name = "";
@@ -787,15 +787,21 @@ function parseBlock(
   // rows, which would otherwise swallow the whole table as one attack name.
   if (numCols <= 1 && !combat.length && !combatText)
     combat = parseCombat(statHeader);
-  const skills = parseKeyedList(
-    skillsSection(body, form) ||
-      skillsSection(fallback, form) ||
-      skillsSection(sharedTail, form),
-  );
-  const languages = parseKeyedList(
-    sectionBody(body, "Languages") ||
-      sectionBody(fallback, "Languages") ||
-      sectionBody(sharedTail, "Languages"),
+  // Languages are just skills in CoC7. Parse the inline skills and any dedicated
+  // "Languages:" section, then merge them into one map with canonical
+  // "Language (X)" names, so a language lands in the same place regardless of
+  // whether the sheet listed it among the skills or under its own heading.
+  const skills = mergeLanguages(
+    parseKeyedList(
+      skillsSection(body, form) ||
+        skillsSection(fallback, form) ||
+        skillsSection(sharedTail, form),
+    ),
+    parseKeyedList(
+      sectionBody(body, "Languages") ||
+        sectionBody(fallback, "Languages") ||
+        sectionBody(sharedTail, "Languages"),
+    ),
   );
   const spells = parseSpells(
     sectionBody(body, "Spells") ||
@@ -840,7 +846,6 @@ function parseBlock(
         attacksPerRound,
         combat,
         skills,
-        languages,
         spells,
         sanityLoss,
         armor,
@@ -898,7 +903,6 @@ function parseBlock(
       attacksPerRound,
       combat,
       skills,
-      languages,
       spells,
       sanityLoss,
       armor,
@@ -943,10 +947,19 @@ function isHeadingCase(matched: string): boolean {
 // list items, not this stat block's section headings.
 function findLabel(masked: string, label: string, min = 0): number {
   const re = labelRe(label);
+  // "Languages (any desired) 70%" is a Pulp *skill*, not the Languages section
+  // heading: in the paren-masked text a value (digits) directly follows the word.
+  // A real heading is followed by ":" or a language name, never a bare number.
+  const guardLanguages = /^languages$/i.test(label);
   for (let m = re.exec(masked); m; m = re.exec(masked)) {
     if (m.index < min || !isHeadingCase(m[0])) continue;
     const before = masked.slice(Math.max(0, m.index - 3), m.index);
     if (/[•·]\s*$/.test(before)) continue;
+    if (
+      guardLanguages &&
+      /^\s*\d/.test(masked.slice(m.index + m[0].length, m.index + m[0].length + 24))
+    )
+      continue;
     return m.index;
   }
   return -1;
@@ -2062,6 +2075,64 @@ function cleanEntryName(raw: string): string {
   if (open > close) s = clean(s.slice(0, s.lastIndexOf("(")));
   else if (close > open) s = clean(s.replace(/\)[^)]*$/, ""));
   return s;
+}
+
+// Expand a compact language list that carries its values inside a parenthetical
+// ("Languages (Italian 80%, Latin 35%, Creole 30%)") into one "Language (X) NN%"
+// per language — the same shape as "Sciences (Biology 70%, Chemistry 90%)". This
+// runs on the whole body before section splitting so the "Languages(" word no
+// longer looks like a section heading and the languages join the skills flow.
+// A "Language (Italian)" with no value inside the parens is a normal skill spec
+// and is left alone.
+function expandLanguageList(body: string): string {
+  return body.replace(/\bLanguages?\s*\(([^)]*)\)/gi, (whole, inner) => {
+    if (!/\d\s*%/.test(inner)) return whole;
+    const parts = inner
+      .split(",")
+      .map((part: string) => {
+        const m = /^\s*([A-Za-z][A-Za-z '/-]*?)\s*(\d{1,3})\s*%/.exec(part);
+        return m ? `Language (${m[1].trim()}) ${m[2]}%` : "";
+      })
+      .filter(Boolean);
+    return parts.length ? parts.join(", ") : whole;
+  });
+}
+
+// Is this skill name a language entry, in any of the printed forms — "Language
+// (French)", "Own Language (Norwegian)", "Other Language (Latin)", "Languages
+// (any desired)", or a bare "Language"?
+function isLanguageName(name: string): boolean {
+  return /^\s*(?:own|other)?\s*languages?\b/i.test(name);
+}
+
+// Canonicalise a language skill name to CoC7's "Language (X)" form: strip an
+// "Own"/"Other" prefix, keep the specific language, and collapse the generic
+// forms ("any desired", "any", bare) to "Language (Any)" / "(Own)" / "(Other)".
+// A non-language name (or an unparseable nested-paren one) is returned unchanged.
+function normalizeLanguageName(name: string): string {
+  const m = name.match(/^\s*(own|other)?\s*languages?\s*(?:\(([^)]*)\))?\s*$/i);
+  if (!m) return name;
+  const prefix = (m[1] || "").toLowerCase();
+  let spec = (m[2] || "").trim();
+  if (!spec) spec = prefix === "own" ? "Own" : prefix === "other" ? "Other" : "Any";
+  else if (/^any\b|desired/i.test(spec)) spec = "Any";
+  return `Language (${spec})`;
+}
+
+// Merge the inline skills and the dedicated "Languages:" section into one map.
+// Language entries in either source are canonicalised to "Language (X)", so a
+// language ends up in the same place however the sheet listed it. Bare names in
+// the Languages section ("French") are wrapped as "Language (French)".
+function mergeLanguages(skills: Skills, languages: Skills): Skills {
+  const out: Skills = {};
+  for (const [name, value] of Object.entries(skills)) {
+    out[normalizeLanguageName(name)] = value;
+  }
+  for (const [name, value] of Object.entries(languages)) {
+    out[isLanguageName(name) ? normalizeLanguageName(name) : `Language (${name})`] =
+      value;
+  }
+  return out;
 }
 
 // A parenthetical/asterisked note that sometimes sits between MP and Combat.

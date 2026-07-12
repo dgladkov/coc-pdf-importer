@@ -323,15 +323,15 @@ describe("parseCocCharacters (unit)", () => {
     assert.equal(c.skills["Science (Chemistry)"], 90);
     assert.equal(c.skills["Science (Physics)"], 25);
     assert.equal(c.skills["Spot Hidden"], 45);
-    // Prose prefix "Varies, assume" dropped, leaving the bare language names.
-    assert.equal(c.languages["Arabic"], 35);
-    assert.equal(c.languages["English"], 35);
+    // Prose prefix "Varies, assume" dropped; the dedicated "Languages" section's
+    // bare names merge into the skills as "Language (X)".
+    assert.equal(c.skills["Language (Arabic)"], 35);
+    assert.equal(c.skills["Language (English)"], 35);
     // No entry starts lowercase or has unbalanced parentheses.
     const bad = (k: string) =>
       /^[a-z]/.test(k) ||
       (k.match(/\(/g) ?? []).length !== (k.match(/\)/g) ?? []).length;
     assert.ok(!Object.keys(c.skills).some(bad), "a skill name is malformed");
-    assert.ok(!Object.keys(c.languages).some(bad), "a language name is malformed");
   });
 
   test("a numeric multi-column group expands to one character per column", () => {
@@ -351,16 +351,37 @@ describe("parseCocCharacters (unit)", () => {
     assert.equal(cs[2].characteristics.INT!.value, 55);
   });
 
-  test("languages parse separately from skills", () => {
+  // A dedicated "Languages:" section merges into the skills as "Language (X)".
+  test("a Languages section merges into skills as Language (X)", () => {
     const [c] = parseCocCharacters(
       "Scholar, x STR 50 CON 50 SIZ 50 DEX 50 INT 60 APP 50 POW 50 EDU 70 SAN 50 HP 10 " +
         "DB: 0 Build: 0 Move: 8 MP: 10 Skills Library Use 60%, Spot Hidden 40%. " +
         "Languages Latin 40%, Greek 25%.",
     );
     assert.equal(c.skills["Library Use"], 60);
-    assert.equal(c.languages["Latin"], 40);
-    assert.equal(c.languages["Greek"], 25);
-    assert.equal(c.skills["Latin"], undefined); // languages are not skills
+    assert.equal(c.skills["Language (Latin)"], 40);
+    assert.equal(c.skills["Language (Greek)"], 25);
+  });
+
+  // Inline language skills come in several forms; all canonicalise to
+  // "Language (X)", and the Pulp "Languages (any desired)" skill is neither a
+  // section heading (it must not truncate the skills) nor left uncanonicalised.
+  test("inline language skills canonicalise to Language (X)", () => {
+    const [c] = parseCocCharacters(
+      "Adept, x STR 50 CON 50 SIZ 50 DEX 50 INT 60 APP 50 POW 50 EDU 70 SAN 50 HP 10 " +
+        "DB: 0 Build: 0 Move: 8 MP: 10 " +
+        "Skills Own Language (English) 65%, Other Language (French) 30%, " +
+        "Languages (any desired) 70%, Listen 55%, Spot Hidden 45%.",
+    );
+    assert.equal(c.skills["Language (English)"], 65);
+    assert.equal(c.skills["Language (French)"], 30);
+    assert.equal(c.skills["Language (Any)"], 70);
+    // The "Languages (any desired)" skill did not truncate the list.
+    assert.equal(c.skills["Listen"], 55);
+    assert.equal(c.skills["Spot Hidden"], 45);
+    // No "Own/Other Language" or bare "Languages" survives.
+    const raw = (k: string) => /^\s*(?:own|other)\s+language|^languages\b/i.test(k);
+    assert.ok(!Object.keys(c.skills).some(raw), "an uncanonicalised language name survives");
   });
 
   test("comma-separated spell list is parsed and markers stripped", () => {
@@ -934,7 +955,7 @@ describe("parseCocCharacters (unit)", () => {
     const [base, beast] = cs;
     assert.equal(base.skills["Climb"], 75); // human form's own skills
     assert.equal(base.skills["Stealth"], 75);
-    assert.equal(base.languages["English"], 35); // shared section inherited
+    assert.equal(base.skills["Language (English)"], 35); // shared section inherited
     assert.match(base.sanityLoss ?? "", /0\/1D6/); // shared section inherited
     assert.equal(beast.skills["Climb"], 95); // beast form's own skills
     assert.equal(beast.skills["Stealth"], 100);

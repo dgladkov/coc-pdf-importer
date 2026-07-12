@@ -31,7 +31,6 @@ function makeCharacter(over: Partial<CocCharacter> = {}): CocCharacter {
     attacksPerRound: null,
     combat: [],
     skills: {},
-    languages: {},
     spells: [],
     sanityLoss: null,
     armor: null,
@@ -309,12 +308,15 @@ describe("importCharacters — entity type", () => {
 });
 
 describe("importCharacters — items", () => {
-  test("skills and languages become skill items", async () => {
+  test("skills (including languages) become skill items", async () => {
     await importCharacters(
       [
         makeCharacter({
-          skills: { "Spot Hidden": 45, "Science (Biology)": 30 },
-          languages: { Latin: 25 },
+          skills: {
+            "Spot Hidden": 45,
+            "Science (Biology)": 30,
+            "Language (Latin)": 25,
+          },
         }),
       ],
       { notify: false },

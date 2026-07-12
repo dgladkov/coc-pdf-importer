@@ -370,15 +370,9 @@ function buildItems(character: CocCharacter, indexes: CompendiumIndexes): any[] 
     items.push(item);
   };
 
-  // Skills.
+  // Skills (languages are included, already named "Language (X)").
   for (const [name, value] of Object.entries(character.skills)) {
     addSkill(skillItem(name, value, {}, indexes.skill));
-  }
-
-  // Languages -> "Language (X)".
-  const langSpec = localize("CoC7.LanguageSpecializationName", "Language");
-  for (const [name, value] of Object.entries(character.languages)) {
-    addSkill(skillItem(specName(langSpec, name), value, {}, indexes.skill));
   }
 
   // Combat: Dodge is a skill; everything else is a weapon backed by a skill.
