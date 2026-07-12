@@ -39,12 +39,18 @@ export async function importCharacters(
   await removeReplacedActors(folder, characters);
   const result: ImportResult = { created: 0, failed: 0, actors: [] };
 
+  // Look up the system's skill/weapon/spell compendia once for the whole batch,
+  // so imported items adopt the real compendium item (CoCID, icon, properties,
+  // damage) where one exists.
+  const indexes = await loadIndexes();
+
   for (const character of characters) {
     try {
       const actor = await importCharacter(
         character,
         folder,
         options.entity ?? "auto",
+        indexes,
       );
       result.actors.push(actor);
       result.created++;
@@ -75,6 +81,7 @@ async function importCharacter(
   character: CocCharacter,
   folder: any,
   entity: EntityType | "auto",
+  indexes: CompendiumIndexes,
 ): Promise<any> {
   const type = entity === "auto" ? guessEntityType(character) : entity;
 
@@ -85,7 +92,7 @@ async function importCharacter(
     system: buildActorSystem(character, type),
   });
 
-  const items = buildItems(character);
+  const items = buildItems(character, indexes);
   if (items.length) {
     await actor.createEmbeddedDocuments("Item", items, { renderSheet: false });
   }
@@ -264,7 +271,96 @@ async function applyDerivedOverrides(
 // Items (skills, weapons + backing skills, languages, spells)
 // ---------------------------------------------------------------------------
 
-function buildItems(character: CocCharacter): any[] {
+// A lowercase name -or- CoCID -> compendium item (plain data) lookup.
+type ItemIndex = Map<string, any>;
+interface CompendiumIndexes {
+  skill: ItemIndex;
+  weapon: ItemIndex;
+  spell: ItemIndex;
+}
+
+// Fetch the system's skill/weapon/spell compendia once (world + packs, best per
+// era/language) and index each by lowercase name and CoCID. Degrades gracefully
+// to empty indexes when the CoC7 API is absent (unit tests, non-CoC7 world), in
+// which case items are built from the parsed data alone.
+async function loadIndexes(): Promise<CompendiumIndexes> {
+  const [skill, weapon, spell] = await Promise.all([
+    loadSkillIndex(),
+    loadCocidIndex(/^i\.weapon\./),
+    loadCocidIndex(/^i\.spell\./),
+  ]);
+  return { skill, weapon, spell };
+}
+
+// Skills come from the system's dedicated (cached) skill list.
+async function loadSkillIndex(): Promise<ItemIndex> {
+  const index: ItemIndex = new Map();
+  try {
+    const list = await game.CoC7?.skillNames?.getList?.();
+    if (list) indexDocuments(index, Object.values(list));
+  } catch (err) {
+    console.warn("coc-pdf-importer: skill compendium lookup unavailable", err);
+  }
+  return index;
+}
+
+// Weapons/spells come from a CoCID-regex query over world + packs.
+async function loadCocidIndex(cocidRegExp: RegExp): Promise<ItemIndex> {
+  const index: ItemIndex = new Map();
+  try {
+    const docs = await game.CoC7?.cocid?.fromCoCIDRegexBest?.({
+      cocidRegExp,
+      type: "i",
+    });
+    if (docs) indexDocuments(index, docs);
+  } catch (err) {
+    console.warn("coc-pdf-importer: compendium lookup unavailable", err);
+  }
+  return index;
+}
+
+function indexDocuments(index: ItemIndex, docs: any[]): void {
+  for (const doc of docs) {
+    const data = doc?.toObject ? doc.toObject() : doc;
+    if (!data) continue;
+    if (data.name) index.set(String(data.name).toLowerCase(), data);
+    const cocid = data.flags?.CoC7?.cocidFlag?.id;
+    if (cocid) index.set(String(cocid).toLowerCase(), data);
+  }
+}
+
+// Find a compendium item by full name or CoCID. A specialized skill with no exact
+// entry falls back to its generic "(Any)" template ("Science (Biology)" ->
+// "Science (Any)"); weapons reference their backing skill by CoCID.
+function findCompendiumItem(ref: string, index: ItemIndex): any | null {
+  const direct = index.get(ref.toLowerCase());
+  if (direct) return direct;
+  const m = ref.match(/^([^(]+)\(.+\)\s*$/);
+  if (m) {
+    const any = index.get(`${m[1].trim()} (Any)`.toLowerCase());
+    if (any) return any;
+  }
+  return null;
+}
+
+// Kebab-case a name for a CoCID (matches CoC7Utilities.toKebabCase).
+function toKebabCase(s: string): string {
+  const m = (s ?? "").match(
+    /[A-Z]{2,}(?=[A-Z][a-z]+[0-9]*|\b)|[A-Z]?[a-z]+[0-9]*|[A-Z]|[0-9]+/g,
+  );
+  return m ? m.join("-").toLowerCase() : "";
+}
+
+// Stamp the CoCID flag ("i.skill.spot-hidden") the system uses to recognise an
+// item, derived from its final name.
+function setCocid(data: any, type: string): void {
+  const id = `i.${type}.${toKebabCase(data.name ?? "")}`;
+  data.flags = data.flags ?? {};
+  data.flags.CoC7 = data.flags.CoC7 ?? {};
+  data.flags.CoC7.cocidFlag = { ...(data.flags.CoC7.cocidFlag ?? {}), id };
+}
+
+function buildItems(character: CocCharacter, indexes: CompendiumIndexes): any[] {
   const items: any[] = [];
   const skillNames = new Set<string>();
 
@@ -276,29 +372,29 @@ function buildItems(character: CocCharacter): any[] {
 
   // Skills.
   for (const [name, value] of Object.entries(character.skills)) {
-    addSkill(skillItem(name, value));
+    addSkill(skillItem(name, value, {}, indexes.skill));
   }
 
   // Languages -> "Language (X)".
   const langSpec = localize("CoC7.LanguageSpecializationName", "Language");
   for (const [name, value] of Object.entries(character.languages)) {
-    addSkill(skillItem(specName(langSpec, name), value));
+    addSkill(skillItem(specName(langSpec, name), value, {}, indexes.skill));
   }
 
   // Combat: Dodge is a skill; everything else is a weapon backed by a skill.
   for (const attack of character.combat) {
     if (/^dodge$/i.test(attack.name)) {
-      addSkill(skillItem("Dodge", attack.value ?? 0));
+      addSkill(skillItem("Dodge", attack.value ?? 0, {}, indexes.skill));
       continue;
     }
-    const { weapon, skill } = weaponFromAttack(attack);
-    if (skill) addSkill(skill);
+    const { weapon, skills } = weaponFromAttack(attack, indexes);
+    for (const skill of skills) addSkill(skill);
     items.push(weapon);
   }
 
   // Spells.
   for (const name of character.spells) {
-    items.push({ type: "spell", name, system: {} });
+    items.push(spellItem(name, indexes.spell));
   }
 
   // Carried gear (a pre-gen's "Possessions"/"Equipment" list) -> generic item
@@ -313,10 +409,30 @@ function buildItems(character: CocCharacter): any[] {
 const FIREARM_RE =
   /\b(revolver|pistol|rifle|shotgun|gun|firearm|automatic|carbine|derringer|colt|luger|mauser|musket|needle|bow|sling)\b|\.\d{2}\b/i;
 
-function weaponFromAttack(attack: CombatEntry): {
-  weapon: any;
-  skill: any | null;
-} {
+function weaponFromAttack(
+  attack: CombatEntry,
+  indexes: CompendiumIndexes,
+): { weapon: any; skills: any[] } {
+  // Prefer the real compendium weapon: it carries the correct damage, range,
+  // malfunction, and backing-skill reference. Add the skill(s) it references
+  // (by CoCID), setting the main one's base to the attack's skill %.
+  const found = findCompendiumItem(attack.name, indexes.weapon);
+  if (found) {
+    const weapon = structuredClone(found);
+    delete weapon._id;
+    const skills: any[] = [];
+    const refs = [
+      { ref: weapon.system?.skill?.main?.name, value: attack.value ?? 0 },
+      { ref: weapon.system?.skill?.alternativ?.name, value: 0 },
+    ];
+    for (const { ref, value } of refs) {
+      const skill = ref ? skillFromRef(ref, value, indexes.skill) : null;
+      if (skill) skills.push(skill);
+    }
+    return { weapon, skills };
+  }
+
+  // Fallback: build the weapon and its backing skill from the parsed attack.
   const ranged = FIREARM_RE.test(attack.name);
   const maneuver = /\bman(?:oeuv|euv)re?\b|\bmnvr\b/i.test(attack.name);
   const spec = localize(
@@ -329,12 +445,17 @@ function weaponFromAttack(attack: CombatEntry): {
 
   const skill =
     attack.value != null
-      ? skillItem(skillFullName, attack.value, {
-          special: true,
-          fighting: !ranged,
-          firearm: ranged,
-          ranged,
-        })
+      ? skillItem(
+          skillFullName,
+          attack.value,
+          {
+            special: true,
+            fighting: !ranged,
+            firearm: ranged,
+            ranged,
+          },
+          indexes.skill,
+        )
       : null;
 
   const weapon = {
@@ -350,15 +471,59 @@ function weaponFromAttack(attack: CombatEntry): {
     },
   };
 
-  return { weapon, skill };
+  return { weapon, skills: skill ? [skill] : [] };
+}
+
+// Clone a compendium skill referenced by a weapon (by CoCID or name), setting its
+// base to `value`. Returns null when the skill is not in the compendium (the
+// weapon still references it by name and the sheet resolves it).
+function skillFromRef(
+  ref: string,
+  value: number,
+  skillIndex: ItemIndex,
+): any | null {
+  const found = findCompendiumItem(ref, skillIndex);
+  if (!found) return null;
+  const base = Math.max(0, Math.round(Number(value) || 0));
+  const data = structuredClone(found);
+  delete data._id;
+  data.system = data.system ?? {};
+  data.system.base = String(base);
+  data.system.adjustments = { ...(data.system.adjustments ?? {}), base };
+  if (data.system.properties) {
+    data.system.properties.requiresname = false;
+    data.system.properties.picknameonly = false;
+  }
+  setCocid(data, "skill");
+  return data;
+}
+
+// A spell item: the compendium spell (with its description/era config) when one
+// matches, otherwise a bare spell. Always stamped with its CoCID.
+function spellItem(name: string, spellIndex: ItemIndex): any {
+  const found = findCompendiumItem(name, spellIndex);
+  let data: any;
+  if (found) {
+    data = structuredClone(found);
+    delete data._id;
+    data.name = name;
+  } else {
+    data = { type: "spell", name, system: {} };
+  }
+  setCocid(data, "spell");
+  return data;
 }
 
 // Build a CoC7 skill item. A name of the form "Spec (Name)" is split into its
 // specialization + skillName; the percentage is stored as the base adjustment.
+// When the skill (or its generic "(Any)" template) exists in the compendium, the
+// real item is cloned so it keeps its CoCID, icon, and properties — only the base
+// value (and, for a filled-in specialization, the name) is overridden.
 function skillItem(
   fullName: string,
   value: number,
   extraProps: Record<string, boolean> = {},
+  skillIndex?: ItemIndex,
 ): any {
   const match = fullName.match(/^([^(]+)\s*\((.+)\)$/);
   const specialization = match ? match[1].trim() : "";
@@ -366,17 +531,39 @@ function skillItem(
   const name = specialization ? `${specialization} (${skillName})` : skillName;
   const base = Math.max(0, Math.round(Number(value) || 0));
 
-  return {
-    type: "skill",
-    name,
-    system: {
-      skillName,
-      specialization,
-      base: String(base),
-      adjustments: { base },
-      properties: { special: !!match, ...extraProps },
-    },
-  };
+  const found = skillIndex ? findCompendiumItem(name, skillIndex) : null;
+  let data: any;
+  if (found) {
+    data = structuredClone(found);
+    delete data._id;
+    data.name = name;
+    data.system = data.system ?? {};
+    data.system.skillName = skillName;
+    data.system.specialization = specialization;
+    data.system.base = String(base);
+    data.system.adjustments = { ...(data.system.adjustments ?? {}), base };
+    // A cloned "(Any)" template must not re-prompt for a specialization name.
+    if (data.system.properties) {
+      data.system.properties.requiresname = false;
+      data.system.properties.picknameonly = false;
+      for (const [k, v] of Object.entries(extraProps))
+        data.system.properties[k] = v;
+    }
+  } else {
+    data = {
+      type: "skill",
+      name,
+      system: {
+        skillName,
+        specialization,
+        base: String(base),
+        adjustments: { base },
+        properties: { special: !!match, ...extraProps },
+      },
+    };
+  }
+  setCocid(data, "skill");
+  return data;
 }
 
 // ---------------------------------------------------------------------------

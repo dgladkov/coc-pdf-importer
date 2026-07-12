@@ -39,6 +39,20 @@ interface FoundryGame {
   settings: {
     registerMenu(namespace: string, key: string, config: object): void;
   };
+  // The CoC7 system API. `skillNames.getList()` resolves to a map of
+  // CoCID -> skill item; `cocid.fromCoCIDRegexBest` returns the best item per
+  // CoCID matching a regex (world + compendium, best per era/language).
+  CoC7?: {
+    skillNames?: {
+      getList(): Promise<Record<string, any>>;
+    };
+    cocid?: {
+      fromCoCIDRegexBest(options: {
+        cocidRegExp: RegExp;
+        type: string;
+      }): Promise<any[]>;
+    };
+  };
 }
 
 interface FoundryUi {

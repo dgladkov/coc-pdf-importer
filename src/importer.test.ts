@@ -422,6 +422,162 @@ describe("importCharacters — items", () => {
       ["notebook", "ghost hunting kit (string, matches)"],
     );
   });
+});
+
+// --- compendium lookup -----------------------------------------------------
+
+// Install a CoC7 skill/weapon/spell compendium on the mocked game global.
+function mockCompendium(opts: {
+  skills?: any[];
+  weapons?: any[];
+  spells?: any[];
+}) {
+  const byCoCID = (docs: any[]) =>
+    Object.fromEntries(
+      docs.map((d) => [d.flags.CoC7.cocidFlag.id, d]),
+    );
+  (globalThis as any).game.CoC7 = {
+    skillNames: { getList: async () => byCoCID(opts.skills ?? []) },
+    cocid: {
+      fromCoCIDRegexBest: async ({ cocidRegExp }: { cocidRegExp: RegExp }) =>
+        cocidRegExp.source.includes("weapon")
+          ? (opts.weapons ?? [])
+          : cocidRegExp.source.includes("spell")
+            ? (opts.spells ?? [])
+            : [],
+    },
+  };
+}
+
+describe("importCharacters — compendium lookup", () => {
+  test("a matched skill is cloned (icon + CoCID kept, base overridden)", async () => {
+    mockCompendium({
+      skills: [
+        {
+          name: "Spot Hidden",
+          type: "skill",
+          img: "icons/spot.webp",
+          _id: "abc",
+          system: { skillName: "Spot Hidden", specialization: "", base: "25" },
+          flags: { CoC7: { cocidFlag: { id: "i.skill.spot-hidden" } } },
+        },
+      ],
+    });
+    await importCharacters([makeCharacter({ skills: { "Spot Hidden": 65 } })], {
+      notify: false,
+    });
+    const s = item(created[0], "Spot Hidden");
+    assert.equal(s.img, "icons/spot.webp");
+    assert.equal(s.system.base, "65"); // parsed value applied
+    assert.equal(s._id, undefined); // stripped so a new id is assigned
+    assert.equal(s.flags.CoC7.cocidFlag.id, "i.skill.spot-hidden");
+  });
+
+  test("a specialized skill falls back to the (Any) compendium template", async () => {
+    mockCompendium({
+      skills: [
+        {
+          name: "Science (Any)",
+          type: "skill",
+          img: "icons/science.webp",
+          system: {
+            skillName: "Any",
+            specialization: "Science",
+            base: "1",
+            properties: { special: true, requiresname: true, picknameonly: true },
+          },
+          flags: { CoC7: { cocidFlag: { id: "i.skill.science-any" } } },
+        },
+      ],
+    });
+    await importCharacters(
+      [makeCharacter({ skills: { "Science (Biology)": 50 } })],
+      { notify: false },
+    );
+    const s = item(created[0], "Science (Biology)");
+    assert.equal(s.img, "icons/science.webp"); // template's icon
+    assert.equal(s.system.skillName, "Biology");
+    assert.equal(s.system.specialization, "Science");
+    assert.equal(s.system.base, "50");
+    assert.equal(s.system.properties.requiresname, false); // no re-prompt
+    assert.equal(s.flags.CoC7.cocidFlag.id, "i.skill.science-biology");
+  });
+
+  test("a matched weapon is used with its compendium damage + backing skill", async () => {
+    mockCompendium({
+      skills: [
+        {
+          name: "Fighting (Brawl)",
+          type: "skill",
+          system: { skillName: "Brawl", specialization: "Fighting", base: "25" },
+          flags: { CoC7: { cocidFlag: { id: "i.skill.fighting-brawl" } } },
+        },
+      ],
+      weapons: [
+        {
+          name: "Brass Knuckles",
+          type: "weapon",
+          img: "icons/knuckles.webp",
+          system: {
+            skill: { main: { name: "i.skill.fighting-brawl" } },
+            range: { normal: { damage: "1D3+1" } },
+            properties: { rngd: false, addb: true },
+          },
+          flags: { CoC7: { cocidFlag: { id: "i.weapon.brass-knuckles" } } },
+        },
+      ],
+    });
+    await importCharacters(
+      [makeCharacter({ combat: [attack("Brass Knuckles", { value: 55, damage: "1D3" })] })],
+      { notify: false },
+    );
+    const a = created[0];
+    const weapon = a.items.find(
+      (i: any) => i.type === "weapon" && i.name === "Brass Knuckles",
+    );
+    assert.equal(weapon.img, "icons/knuckles.webp");
+    assert.equal(weapon.system.range.normal.damage, "1D3+1"); // compendium damage
+    const skill = a.items.find(
+      (i: any) => i.type === "skill" && i.name === "Fighting (Brawl)",
+    );
+    assert.equal(skill.system.base, "55"); // attack skill % applied to backing skill
+    assert.equal(skill.flags.CoC7.cocidFlag.id, "i.skill.fighting-brawl");
+  });
+
+  test("a matched spell is cloned and CoCID-stamped", async () => {
+    mockCompendium({
+      spells: [
+        {
+          name: "Wither Limb",
+          type: "spell",
+          img: "icons/wither.webp",
+          system: {},
+          flags: { CoC7: { cocidFlag: { id: "i.spell.wither-limb" } } },
+        },
+      ],
+    });
+    await importCharacters([makeCharacter({ spells: ["Wither Limb"] })], {
+      notify: false,
+    });
+    const sp = item(created[0], "Wither Limb");
+    assert.equal(sp.img, "icons/wither.webp");
+    assert.equal(sp.flags.CoC7.cocidFlag.id, "i.spell.wither-limb");
+  });
+
+  test("skills and spells are CoCID-stamped even without a compendium", async () => {
+    await importCharacters(
+      [makeCharacter({ skills: { "Spot Hidden": 40 }, spells: ["Cloud Memory"] })],
+      { notify: false },
+    );
+    assert.equal(
+      item(created[0], "Spot Hidden").flags.CoC7.cocidFlag.id,
+      "i.skill.spot-hidden",
+    );
+    assert.equal(
+      item(created[0], "Cloud Memory").flags.CoC7.cocidFlag.id,
+      "i.spell.cloud-memory",
+    );
+  });
 
   test("a skill shared between the skills list and combat is added once", async () => {
     await importCharacters(
