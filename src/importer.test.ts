@@ -801,7 +801,7 @@ describe("importCharacters — compendium lookup", () => {
     assert.equal(s.flags.CoC7.cocidFlag.id, "i.skill.science-biology");
   });
 
-  test("a matched weapon is used with its compendium damage + backing skill", async () => {
+  test("a matched weapon keeps compendium metadata but takes the book's damage", async () => {
     mockCompendium({
       skills: [
         {
@@ -833,13 +833,54 @@ describe("importCharacters — compendium lookup", () => {
     const weapon = a.items.find(
       (i: any) => i.type === "weapon" && i.name === "Brass Knuckles",
     );
+    // Metadata from the compendium...
     assert.equal(weapon.img, "icons/knuckles.webp");
-    assert.equal(weapon.system.range.normal.damage, "1D3+1"); // compendium damage
+    assert.equal(weapon.flags.CoC7.cocidFlag.id, "i.weapon.brass-knuckles");
+    // ...but the book's damage (1D3) overrides the compendium's (1D3+1), and the
+    // add-DB flag reflects our parse (no bonus in the book damage).
+    assert.equal(weapon.system.range.normal.damage, "1D3");
+    assert.equal(weapon.system.properties.addb, false);
     const skill = a.items.find(
       (i: any) => i.type === "skill" && i.name === "Fighting (Brawl)",
     );
     assert.equal(skill.system.base, "55"); // attack skill % applied to backing skill
     assert.equal(skill.flags.CoC7.cocidFlag.id, "i.skill.fighting-brawl");
+  });
+
+  const lightningGun = () => ({
+    name: "Lightning Gun",
+    type: "weapon",
+    system: {
+      skill: { main: { name: "Firearms (Lightning Gun)" } },
+      range: { normal: { damage: "1D10" } },
+      properties: { rngd: true, impl: true },
+    },
+    flags: { CoC7: { cocidFlag: { id: "i.weapon.lightning-gun" } } },
+  });
+
+  test("a matched weapon takes the book's damage even with trailing prose", async () => {
+    mockCompendium({ weapons: [lightningGun()] });
+    await importCharacters(
+      [makeCharacter({ combat: [attack("Lightning Gun", { value: 40, damage: "2D8 per charge" })] })],
+      { notify: false },
+    );
+    const weapon = created[0].items.find(
+      (i: any) => i.type === "weapon" && i.name === "Lightning Gun",
+    );
+    assert.equal(weapon.system.range.normal.damage, "2D8"); // book 2D8, not compendium 1D10
+    assert.equal(weapon.system.properties.impl, true); // metadata preserved
+  });
+
+  test("a matched weapon with non-formula damage keeps the compendium's", async () => {
+    mockCompendium({ weapons: [lightningGun()] });
+    await importCharacters(
+      [makeCharacter({ combat: [attack("Lightning Gun", { value: 40, damage: "special (see text)" })] })],
+      { notify: false },
+    );
+    const weapon = created[0].items.find(
+      (i: any) => i.type === "weapon" && i.name === "Lightning Gun",
+    );
+    assert.equal(weapon.system.range.normal.damage, "1D10"); // no dice term -> kept
   });
 
   test("a compendium weapon whose skill doesn't exist creates that exact named skill", async () => {

@@ -534,8 +534,10 @@ function buildItems(
       const weapon = structuredClone(found);
       delete weapon._id;
       // Keep the stat block's own name (so the keeper can cross-check against the
-      // book) while taking the compendium weapon's stats, icon, and CoCID.
+      // book) while taking the compendium weapon's stats, icon, and CoCID — but
+      // the book's damage always wins over the compendium's.
       weapon.name = attack.name;
+      overrideBookDamage(weapon, attack, character.derived.DB);
       const ranged = !!weapon.system?.properties?.rngd;
       const refs = [
         { ref: weapon.system?.skill?.main?.name, value: attack.value ?? 0 },
@@ -555,6 +557,7 @@ function buildItems(
         weapon = structuredClone(found);
         delete weapon._id;
         weapon.name = attack.name;
+        overrideBookDamage(weapon, attack, character.derived.DB);
         ranged = !!weapon.system?.properties?.rngd;
       } else {
         ranged = FIREARM_RE.test(attack.name);
@@ -596,31 +599,82 @@ function halfDamageBonus(db: string): string {
   });
 }
 
+// The leading dice-damage formula of a string, dropping any trailing prose
+// ("2D8 per charge" -> "2D8", "1D6, victim must ..." -> "1D6"); supports a
+// "/"-separated range spread ("4D6/2D6/1D6"). null when there is no dice term.
+function leadingDamageFormula(d: string | null): string | null {
+  const s = (d ?? "").replace(/\s+/g, "");
+  const m = s.match(
+    /^\d*[dD]\d+(?:[+-]\d+(?:[dD]\d+)?)*(?:\/\d*[dD]?\d+(?:[+-]\d+(?:[dD]\d+)?)?)*/,
+  );
+  return m ? m[0] : null;
+}
+
 // Normalise a weapon damage that inlines this actor's damage bonus. A stat block
 // often writes the exact value ("1D4+1D6") instead of "+DB"; when the damage ends
 // with the actor's DB, strip that trailing term and flag `addb` so the sheet adds
 // the bonus itself — matching how the compendium (and the system's own importers)
 // store it. A thrown weapon adds *half* the DB, so a trailing half-DB sets `ahdb`
-// instead. Otherwise the damage is left untouched.
+// instead. The result is reduced to its clean dice formula; `valid` is false when
+// the damage carries no dice term (pure prose), so the caller can decline it.
 function normalizeWeaponDamage(
   damage: string | null,
   db: string | null,
-): { damage: string; addb: boolean; ahdb: boolean } {
-  const d = (damage ?? "").replace(/\s+/g, "");
-  const none = { damage: damage ?? "", addb: false, ahdb: false };
-  if (!d) return { damage: "", addb: false, ahdb: false };
-  if (/\+DB$/i.test(d))
-    return { damage: d.replace(/\+DB$/i, ""), addb: true, ahdb: false };
-  const raw = (db ?? "").trim();
-  if (!raw || raw === "0" || raw === "+0") return none;
-  const full = (/^[+-]/.test(raw) ? raw : "+" + raw).replace(/\s+/g, "");
-  const half = halfDamageBonus(full);
-  const D = d.toUpperCase();
-  if (D.endsWith(full.toUpperCase()))
-    return { damage: d.slice(0, d.length - full.length), addb: true, ahdb: false };
-  if (half.toUpperCase() !== full.toUpperCase() && D.endsWith(half.toUpperCase()))
-    return { damage: d.slice(0, d.length - half.length), addb: false, ahdb: true };
-  return none;
+): { damage: string; addb: boolean; ahdb: boolean; valid: boolean } {
+  const raw = (damage ?? "").replace(/\s+/g, "");
+  let base = raw;
+  let addb = false;
+  let ahdb = false;
+  if (raw) {
+    if (/\+DB$/i.test(raw)) {
+      base = raw.replace(/\+DB$/i, "");
+      addb = true;
+    } else {
+      const r = (db ?? "").trim();
+      if (r && r !== "0" && r !== "+0") {
+        const full = (/^[+-]/.test(r) ? r : "+" + r).replace(/\s+/g, "");
+        const half = halfDamageBonus(full);
+        const R = raw.toUpperCase();
+        if (R.endsWith(full.toUpperCase())) {
+          base = raw.slice(0, raw.length - full.length);
+          addb = true;
+        } else if (
+          half.toUpperCase() !== full.toUpperCase() &&
+          R.endsWith(half.toUpperCase())
+        ) {
+          base = raw.slice(0, raw.length - half.length);
+          ahdb = true;
+        }
+      }
+    }
+  }
+  const clean = leadingDamageFormula(base);
+  return { damage: clean ?? "", addb, ahdb, valid: clean != null };
+}
+
+// Keep a matched compendium weapon's metadata (icon, skill, range, malfunction,
+// impale, ...) but override its damage and add-DB flags with the book's own
+// values, so imported damage never deviates from the source. A "/"-spread fills
+// the normal/long/extreme range damages. When the book damage has no dice term,
+// the compendium's damage is kept.
+function overrideBookDamage(
+  weapon: any,
+  attack: CombatEntry,
+  db: string | null,
+): void {
+  const { damage, addb, ahdb, valid } = normalizeWeaponDamage(attack.damage, db);
+  if (!valid) return;
+  const sys = (weapon.system = weapon.system ?? {});
+  const range = (sys.range = sys.range ?? {});
+  const parts = damage.split("/");
+  range.normal = { ...(range.normal ?? {}), damage: parts[0] ?? "" };
+  if (parts.length > 1) {
+    range.long = { ...(range.long ?? {}), damage: parts[1] ?? "" };
+    range.extreme = { ...(range.extreme ?? {}), damage: parts[2] ?? "" };
+  }
+  sys.properties = sys.properties ?? {};
+  sys.properties.addb = addb;
+  sys.properties.ahdb = ahdb;
 }
 
 // Weapon document for a custom (non-compendium) attack. Its backing skill is
