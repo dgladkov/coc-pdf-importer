@@ -607,6 +607,28 @@ describe("importCharacters — items", () => {
     assert.equal(w("Claw").system.properties.addb, false);
   });
 
+  test("a thrown weapon's half damage bonus is normalized to the ahdb flag", async () => {
+    await importCharacters(
+      [
+        makeCharacter({
+          derived: { DB: "+1D6", Build: null, Move: null, MP: null, Luck: null },
+          combat: [
+            attack("War boomerang", { value: 40, damage: "1D8+1D3" }), // half of +1D6
+            attack("Rock", { value: 40, damage: "1D4+1D6" }), // full DB
+          ],
+        }),
+      ],
+      { notify: false },
+    );
+    const w = (n: string) =>
+      created[0].items.find((i: any) => i.type === "weapon" && i.name === n);
+    assert.equal(w("War boomerang").system.range.normal.damage, "1D8");
+    assert.equal(w("War boomerang").system.properties.ahdb, true);
+    assert.equal(w("War boomerang").system.properties.addb, false);
+    assert.equal(w("Rock").system.properties.addb, true);
+    assert.equal(w("Rock").system.properties.ahdb, false);
+  });
+
   test("a melee weapon never matches a firearm entry (class-gated)", async () => {
     mockCompendium({ weapons: [weaponDoc(".38 or 9mm Revolver")] });
     await importCharacters(

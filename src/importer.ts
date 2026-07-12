@@ -561,25 +561,46 @@ function buildItems(
 const FIREARM_RE =
   /\b(revolver|pistol|rifle|shotgun|gun|firearm|automatic|carbine|derringer|colt|luger|mauser|musket|needle|bow|sling)\b|\.\d{2}\b/i;
 
+// Half of a damage bonus, matching CoC7Utilities.halfDB: halve each die's sides
+// ("+1D6" -> "+1D3", "+2D6" -> "+2D3") and each flat term. Thrown weapons add it.
+function halfDamageBonus(db: string): string {
+  let f = db.replace(/\s+/g, "");
+  if (!/^[+-]/.test(f)) f = "+" + f;
+  return f.replace(/([+-])(\d+)(?:[dD](\d+))?/g, (_m, sign, n, sides) => {
+    if (sides === undefined) {
+      const v = sign === "-" ? Math.ceil(Number(n) / 2) : Math.floor(Number(n) / 2);
+      return sign + v;
+    }
+    const half = sign === "-" ? Math.ceil(Number(sides) / 2) : Math.floor(Number(sides) / 2);
+    return sign + n + "D" + half;
+  });
+}
+
 // Normalise a weapon damage that inlines this actor's damage bonus. A stat block
 // often writes the exact value ("1D4+1D6") instead of "+DB"; when the damage ends
-// with the actor's DB (or a literal "+DB"), strip that trailing term and flag
-// `addb` so the sheet adds the bonus itself — matching how the compendium (and
-// the system's own importers) store it. Otherwise the damage is left untouched.
+// with the actor's DB, strip that trailing term and flag `addb` so the sheet adds
+// the bonus itself — matching how the compendium (and the system's own importers)
+// store it. A thrown weapon adds *half* the DB, so a trailing half-DB sets `ahdb`
+// instead. Otherwise the damage is left untouched.
 function normalizeWeaponDamage(
   damage: string | null,
   db: string | null,
-): { damage: string; addb: boolean } {
+): { damage: string; addb: boolean; ahdb: boolean } {
   const d = (damage ?? "").replace(/\s+/g, "");
-  if (!d) return { damage: "", addb: false };
-  if (/\+DB$/i.test(d)) return { damage: d.replace(/\+DB$/i, ""), addb: true };
+  const none = { damage: damage ?? "", addb: false, ahdb: false };
+  if (!d) return { damage: "", addb: false, ahdb: false };
+  if (/\+DB$/i.test(d))
+    return { damage: d.replace(/\+DB$/i, ""), addb: true, ahdb: false };
   const raw = (db ?? "").trim();
-  if (raw && raw !== "0" && raw !== "+0") {
-    const term = (/^[+-]/.test(raw) ? raw : "+" + raw).replace(/\s+/g, "");
-    if (d.toUpperCase().endsWith(term.toUpperCase()))
-      return { damage: d.slice(0, d.length - term.length), addb: true };
-  }
-  return { damage: damage ?? "", addb: false };
+  if (!raw || raw === "0" || raw === "+0") return none;
+  const full = (/^[+-]/.test(raw) ? raw : "+" + raw).replace(/\s+/g, "");
+  const half = halfDamageBonus(full);
+  const D = d.toUpperCase();
+  if (D.endsWith(full.toUpperCase()))
+    return { damage: d.slice(0, d.length - full.length), addb: true, ahdb: false };
+  if (half.toUpperCase() !== full.toUpperCase() && D.endsWith(half.toUpperCase()))
+    return { damage: d.slice(0, d.length - half.length), addb: false, ahdb: true };
+  return none;
 }
 
 // Weapon document for a custom (non-compendium) attack. Its backing skill is
@@ -590,14 +611,14 @@ function customWeaponData(
   db: string | null,
 ): any {
   const maneuver = /\bman(?:oeuv|euv)re?\b|\bmnvr\b/i.test(attack.name);
-  const { damage, addb } = normalizeWeaponDamage(attack.damage, db);
+  const { damage, addb, ahdb } = normalizeWeaponDamage(attack.damage, db);
   return {
     name: attack.name,
     type: "weapon",
     system: {
       skill: { main: { name: "", id: "" } },
       range: { normal: { value: "", damage } },
-      properties: { rngd: ranged, mnvr: maneuver, addb },
+      properties: { rngd: ranged, mnvr: maneuver, addb, ahdb },
       description: {
         value: attack.note ? `<p>${escapeHtml(attack.note)}</p>` : "",
       },
