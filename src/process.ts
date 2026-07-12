@@ -1742,6 +1742,11 @@ function parseCombat(text: string): CombatEntry[] {
     )
     .trim();
 
+  // Weapon-size abbreviations ("Blackjack/Med. knife", "Lg. club") carry a period
+  // that would otherwise end the attack name and truncate the previous attack's
+  // damage at it; drop the period so the name reads as one weapon.
+  text = text.replace(/\b(Med|Lge?|Sml?|Hvy)\.\s+/g, "$1 ");
+
   // An attack name: an optional honorific ("Mrs. Carruthers (elephant gun)"),
   // an optional caliber dot, then a capital/digit start, then a run of name
   // characters. Internal periods are allowed only as an honorific or a caliber
@@ -1780,6 +1785,11 @@ function parseCombat(text: string): CombatEntry[] {
   // Dodge / end — not to a sentence period, since it can hold an abbreviation
   // ("mnvr.").
   const maneuverNote = String.raw`(?!damage\b)(.+?)(?=\s+${nextAttack}|\s+Dodge\b|$)`;
+  // A "damage" field left blank by a print error ("... 45% (22/9), damage
+  // Thompson SMG 65% ...") — the value is missing before the next attack. Match
+  // an empty damage so it reads as null (the importer then fills it in from the
+  // matched compendium weapon) rather than swallowing the next weapon's name.
+  const damageOrBlank = String.raw`(?:(?=${nextAttack}|Dodge\b)|${damage})`;
 
   // An attack is either:
   //  - "NN% (half/fifth)" with optional ", damage X" or ", <maneuver note>",
@@ -1790,7 +1800,7 @@ function parseCombat(text: string): CombatEntry[] {
   //  - an auto-hit attack, which reads "automatic" where a skill % would sit and
   //    may carry a non-dice damage ("Energy Blast automatic, damage, 20 points").
   const re = new RegExp(
-    String.raw`(${attackName})\s+(?:(\d{1,3})\s*%?\s*,?\s*(?:\(\s*(\d{1,3})\s*\/\s*(\d{1,3})\s*\)(?:\s*,?\s*damage\s+${damage}|\s*,\s*${maneuverNote})?|damage\s+${damage})|damage\s+(?=\d)${damage}|[Aa]utomatic\b\s*,?\s*damage[,]?\s+${damage})`,
+    String.raw`(${attackName})\s+(?:(\d{1,3})\s*%?\s*,?\s*(?:\(\s*(\d{1,3})\s*\/\s*(\d{1,3})\s*\)(?:\s*,?\s*damage\s+${damageOrBlank}|\s*,\s*${maneuverNote})?|damage\s+${damage})|damage\s+(?=\d)${damage}|[Aa]utomatic\b\s*,?\s*damage[,]?\s+${damage})`,
     "g",
   );
 

@@ -12,6 +12,7 @@ import { processPDF } from "../../src/process.ts";
 
 // Every fixture is parsed and its output snapshotted under the same base name.
 const FILES = [
+  "CHA23107-_Pulp_Cthulhu_v1.7",
   "CHA23131 Call of Cthulhu 7th Edition Quick-Start Rules",
   "CHA23140_-_Gateways_to_Terror_1.1",
   "CHA23148_-_Doors_to_Darkness_v1.1",
