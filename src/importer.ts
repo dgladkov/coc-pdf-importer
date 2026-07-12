@@ -537,7 +537,7 @@ function buildItems(
     } else {
       const ranged = FIREARM_RE.test(attack.name);
       customWeapons.push({
-        weapon: customWeaponData(attack, ranged),
+        weapon: customWeaponData(attack, ranged, character.derived.DB),
         value: attack.value,
         ranged,
       });
@@ -561,17 +561,43 @@ function buildItems(
 const FIREARM_RE =
   /\b(revolver|pistol|rifle|shotgun|gun|firearm|automatic|carbine|derringer|colt|luger|mauser|musket|needle|bow|sling)\b|\.\d{2}\b/i;
 
+// Normalise a weapon damage that inlines this actor's damage bonus. A stat block
+// often writes the exact value ("1D4+1D6") instead of "+DB"; when the damage ends
+// with the actor's DB (or a literal "+DB"), strip that trailing term and flag
+// `addb` so the sheet adds the bonus itself — matching how the compendium (and
+// the system's own importers) store it. Otherwise the damage is left untouched.
+function normalizeWeaponDamage(
+  damage: string | null,
+  db: string | null,
+): { damage: string; addb: boolean } {
+  const d = (damage ?? "").replace(/\s+/g, "");
+  if (!d) return { damage: "", addb: false };
+  if (/\+DB$/i.test(d)) return { damage: d.replace(/\+DB$/i, ""), addb: true };
+  const raw = (db ?? "").trim();
+  if (raw && raw !== "0" && raw !== "+0") {
+    const term = (/^[+-]/.test(raw) ? raw : "+" + raw).replace(/\s+/g, "");
+    if (d.toUpperCase().endsWith(term.toUpperCase()))
+      return { damage: d.slice(0, d.length - term.length), addb: true };
+  }
+  return { damage: damage ?? "", addb: false };
+}
+
 // Weapon document for a custom (non-compendium) attack. Its backing skill is
 // filled in later by attachCustomWeapons (skill.main starts empty).
-function customWeaponData(attack: CombatEntry, ranged: boolean): any {
+function customWeaponData(
+  attack: CombatEntry,
+  ranged: boolean,
+  db: string | null,
+): any {
   const maneuver = /\bman(?:oeuv|euv)re?\b|\bmnvr\b/i.test(attack.name);
+  const { damage, addb } = normalizeWeaponDamage(attack.damage, db);
   return {
     name: attack.name,
     type: "weapon",
     system: {
       skill: { main: { name: "", id: "" } },
-      range: { normal: { value: "", damage: attack.damage ?? "" } },
-      properties: { rngd: ranged, mnvr: maneuver },
+      range: { normal: { value: "", damage } },
+      properties: { rngd: ranged, mnvr: maneuver, addb },
       description: {
         value: attack.note ? `<p>${escapeHtml(attack.note)}</p>` : "",
       },

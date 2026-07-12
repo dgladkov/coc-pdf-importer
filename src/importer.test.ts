@@ -580,6 +580,33 @@ describe("importCharacters — items", () => {
     assert.match(cocid("Heavy club"), /club-large/);
   });
 
+  test("an inlined damage bonus is normalized to the addb flag", async () => {
+    await importCharacters(
+      [
+        makeCharacter({
+          derived: { DB: "+1D6", Build: null, Move: null, MP: null, Luck: null },
+          combat: [
+            attack("Tentacle", { value: 40, damage: "1D6+1D6" }), // trailing DB -> stripped
+            attack("Fist", { value: 40, damage: "1D3+DB" }), // literal +DB -> stripped
+            attack("Bite", { value: 40, damage: "1D8" }), // no bonus -> unchanged
+            attack("Claw", { value: 40, damage: "1D6+1D4" }), // +1D4 != actor DB -> kept
+          ],
+        }),
+      ],
+      { notify: false },
+    );
+    const w = (n: string) =>
+      created[0].items.find((i: any) => i.type === "weapon" && i.name === n);
+    assert.equal(w("Tentacle").system.range.normal.damage, "1D6");
+    assert.equal(w("Tentacle").system.properties.addb, true);
+    assert.equal(w("Fist").system.range.normal.damage, "1D3");
+    assert.equal(w("Fist").system.properties.addb, true);
+    assert.equal(w("Bite").system.range.normal.damage, "1D8");
+    assert.equal(w("Bite").system.properties.addb, false);
+    assert.equal(w("Claw").system.range.normal.damage, "1D6+1D4"); // kept as-is
+    assert.equal(w("Claw").system.properties.addb, false);
+  });
+
   test("a melee weapon never matches a firearm entry (class-gated)", async () => {
     mockCompendium({ weapons: [weaponDoc(".38 or 9mm Revolver")] });
     await importCharacters(
