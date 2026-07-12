@@ -162,8 +162,8 @@ describe("Masks of Nyarlathotep", () => {
     assert.equal(revolver!.damage, "1D10+2");
     assert.equal(c.combat.find((a) => a.name === "Brawl")!.damage, "1D3+1D4");
     assert.ok(c.combat.some((a) => a.name === "Dodge"));
-    // Languages parsed separately from skills.
-    assert.equal(c.languages["English"], 85);
+    // Languages are merged into skills as "Language (X)".
+    assert.equal(c.skills["Language (English)"], 85);
     assert.equal(c.skills["Cthulhu Mythos"], 4);
     assert.equal(c.skills["Survival (Mountains)"], 25);
     assert.equal(c.attacksPerRound, "1");

@@ -581,6 +581,124 @@ describe("importCharacters — compendium lookup", () => {
     );
   });
 
+  // Language templates used in the tests below.
+  const LANG_ITEMS = {
+    own: {
+      name: "Language (Own)",
+      type: "skill",
+      img: "own.svg",
+      system: {
+        skillName: "Own",
+        specialization: "Language",
+        base: "@EDU",
+        properties: { special: true, requiresname: true, keepbasevalue: true },
+      },
+      flags: { CoC7: { cocidFlag: { id: "i.skill.language-own" } } },
+    },
+    any: {
+      name: "Language (Any)",
+      type: "skill",
+      img: "any.svg",
+      system: {
+        skillName: "Any",
+        specialization: "Language",
+        base: "1",
+        properties: { special: true, requiresname: true },
+      },
+      flags: { CoC7: { cocidFlag: { id: "i.skill.language-any" } } },
+    },
+    english: {
+      name: "Language (English)",
+      type: "skill",
+      img: "english.svg",
+      system: {
+        skillName: "English",
+        specialization: "Language",
+        base: "1",
+        properties: { special: true },
+      },
+      flags: { CoC7: { cocidFlag: { id: "i.skill.language-english" } } },
+    },
+  };
+
+  test("the own template is used even when an exact language item exists", async () => {
+    mockCompendium({ skills: [LANG_ITEMS.english, LANG_ITEMS.own, LANG_ITEMS.any] });
+    await importCharacters(
+      [
+        makeCharacter({
+          characteristics: chars({ EDU: 80 }),
+          skills: { "Language (English)": 80, "Language (French)": 30 },
+        }),
+      ],
+      { notify: false },
+    );
+    const a = created[0];
+    // English equals EDU -> the OWN template, not the exact "Language (English)".
+    const eng = item(a, "Language (English)");
+    assert.equal(eng.img, "own.svg"); // Language (Own), not english.svg
+    assert.equal(eng.system.skillName, "English");
+    assert.equal(eng.system.base, "@EDU"); // own language tracks EDU
+    // French does not equal EDU -> Language (Other) missing -> Language (Any).
+    const fr = item(a, "Language (French)");
+    assert.equal(fr.img, "any.svg");
+    assert.equal(fr.system.skillName, "French");
+    assert.equal(fr.system.specialization, "Language");
+    assert.equal(fr.system.base, "30");
+    assert.equal(fr.system.properties.requiresname, false);
+    assert.equal(fr.flags.CoC7.cocidFlag.id, "i.skill.language-french");
+  });
+
+  test("a language equal to EDU clones Language (Own); others clone Language (Any)", async () => {
+    mockCompendium({ skills: [LANG_ITEMS.own, LANG_ITEMS.any] });
+    await importCharacters(
+      [
+        makeCharacter({
+          characteristics: chars({ EDU: 75 }),
+          skills: { "Language (Tsalal)": 75, "Language (French)": 30 },
+        }),
+      ],
+      { notify: false },
+    );
+    const a = created[0];
+    const own = item(a, "Language (Tsalal)"); // equals EDU -> own
+    assert.equal(own.img, "own.svg"); // cloned from Language (Own)
+    assert.equal(own.system.skillName, "Tsalal");
+    assert.equal(own.system.base, "@EDU"); // own language tracks EDU
+    assert.equal(own.flags.CoC7.cocidFlag.id, "i.skill.language-tsalal");
+    const fr = item(a, "Language (French)"); // not EDU -> Language (Any)
+    assert.equal(fr.img, "any.svg");
+    assert.equal(fr.system.base, "30"); // concrete value kept
+  });
+
+  test("a language above EDU keeps its concrete value (not pinned to EDU)", async () => {
+    mockCompendium({ skills: [LANG_ITEMS.own, LANG_ITEMS.any] });
+    await importCharacters(
+      [
+        makeCharacter({
+          // An English professor: English is above EDU, so it is not "own".
+          characteristics: chars({ EDU: 70 }),
+          skills: { "Language (English)": 90 },
+        }),
+      ],
+      { notify: false },
+    );
+    const eng = item(created[0], "Language (English)");
+    assert.equal(eng.img, "any.svg"); // not the own template
+    assert.equal(eng.system.base, "90"); // concrete value, not @EDU
+  });
+
+  test("languages get the system icon even without a compendium", async () => {
+    await importCharacters(
+      [makeCharacter({ skills: { "Language (Latin)": 40 } })],
+      { notify: false },
+    );
+    const lat = item(created[0], "Language (Latin)");
+    assert.equal(lat.type, "skill");
+    assert.equal(lat.img, "systems/CoC7/assets/icons/skills/language.svg");
+    assert.equal(lat.system.skillName, "Latin");
+    assert.equal(lat.flags.CoC7.cocidFlag.id, "i.skill.language-latin");
+  });
+
   test("a skill shared between the skills list and combat is added once", async () => {
     await importCharacters(
       [

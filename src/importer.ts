@@ -370,9 +370,21 @@ function buildItems(character: CocCharacter, indexes: CompendiumIndexes): any[] 
     items.push(item);
   };
 
-  // Skills (languages are included, already named "Language (X)").
+  // Skills, with languages handled specially (own vs other; see languageItem).
+  const langEntries: [string, number][] = [];
   for (const [name, value] of Object.entries(character.skills)) {
-    addSkill(skillItem(name, value, {}, indexes.skill));
+    if (isLanguageSkill(name)) langEntries.push([name, value]);
+    else addSkill(skillItem(name, value, {}, indexes.skill));
+  }
+  // A language whose value equals EDU is the character's own (native) language;
+  // its base is pinned to EDU ("@EDU"). Any other value — a foreign language, or
+  // an own language with extra points invested (an English professor above EDU) —
+  // is imported as an "other" language with its concrete value. That is both
+  // simpler and more correct: pinning to EDU would drop those extra points, or
+  // inflate a below-EDU value.
+  const edu = character.characteristics.EDU?.value ?? null;
+  for (const [name, value] of langEntries) {
+    addSkill(languageItem(name, value, edu != null && value === edu, indexes.skill));
   }
 
   // Combat: Dodge is a skill; everything else is a weapon backed by a skill.
@@ -556,6 +568,66 @@ function skillItem(
       },
     };
   }
+  setCocid(data, "skill");
+  return data;
+}
+
+const LANGUAGE_ICON = "systems/CoC7/assets/icons/skills/language.svg";
+
+// A language skill is our canonical "Language (X)" form (Own/Other/Any or a
+// specific language).
+function isLanguageSkill(name: string): boolean {
+  return /^\s*language\s*\(/i.test(name);
+}
+
+// Build a language skill by cloning the own/other template — never the specific
+// "Language (English)" item, which is ambiguous (it says nothing about whether
+// the language is the character's own or another). The character's own (native)
+// language clones "Language (Own)"; every other language clones "Language
+// (Other)", falling back to "Language (Any)" when the module that provides
+// "Other" is absent. The specific language name and value are then applied. With
+// no compendium, a bare language skill carries the system icon.
+function languageItem(
+  name: string,
+  value: number,
+  isOwn: boolean,
+  skillIndex: ItemIndex,
+): any {
+  const template =
+    (isOwn ? skillIndex.get("language (own)") : undefined) ??
+    skillIndex.get("language (other)") ??
+    skillIndex.get("language (any)");
+
+  let data: any;
+  if (template) {
+    data = structuredClone(template);
+    delete data._id;
+  } else {
+    data = { type: "skill", img: LANGUAGE_ICON, system: { properties: {} } };
+  }
+
+  const m = name.match(/^([^(]+)\s*\((.+)\)$/);
+  const specialization = m ? m[1].trim() : "Language";
+  const skillName = m ? m[2].trim() : name;
+  const base = Math.max(0, Math.round(Number(value) || 0));
+
+  data.name = name;
+  data.system = data.system ?? {};
+  data.system.skillName = skillName;
+  data.system.specialization = specialization;
+  // The own (native) language tracks EDU via the CoC7 "@EDU" formula (as the
+  // "Language (Own)" template does); every other language takes its parsed value.
+  if (isOwn) {
+    data.system.base = "@EDU";
+  } else {
+    data.system.base = String(base);
+    data.system.adjustments = { ...(data.system.adjustments ?? {}), base };
+  }
+  data.system.properties = data.system.properties ?? {};
+  data.system.properties.special = true;
+  // We've named the specific language, so the sheet must not re-prompt for it.
+  data.system.properties.requiresname = false;
+  data.system.properties.picknameonly = false;
   setCocid(data, "skill");
   return data;
 }
