@@ -1094,4 +1094,45 @@ describe("parseCocCharacters (unit)", () => {
     assert.deepEqual(c.spells, []);
     assert.equal(c.skills["Accounting"], 60);
   });
+
+  test("a bestiary '(page NNN)' cross-reference is stripped from the name", () => {
+    const [c] = parseCocCharacters(
+      "The Beast (page 306), horror STR 80 CON 80 SIZ 90 DEX 60 INT 50 APP — POW 60 EDU — SAN — HP 17 " +
+        "DB: +2D6 Build: 3 Move: 8 MP: 12",
+    );
+    assert.equal(c.name, "The Beast");
+  });
+
+  test("a header far from STR (a sidebar wedged before the stats) is still recovered", () => {
+    const sidebar = "SIDEBAR BOX " + "boxed prose ".repeat(30); // > the near window
+    const [, villain] = parseCocCharacters(
+      "First NPC, age 20, a bystander STR 50 CON 50 SIZ 50 DEX 50 INT 50 APP 50 POW 50 EDU 50 SAN 50 HP 10 " +
+        "DB: 0 Build: 0 Move: 8 " +
+        "Hector Sample, age 33, a villain He then did many bad things over a long paragraph. " +
+        sidebar +
+        "STR 60 CON 70 SIZ 55 DEX 65 INT 55 APP 45 POW 80 EDU 70 SAN 50 HP 12 DB: +1D4 Build: 1 Move: 8",
+    );
+    assert.equal(villain.name, "Hector Sample");
+    assert.equal(villain.age, 33);
+    assert.equal(villain.description, "a villain");
+  });
+
+  test("a credits-list name (empty block, connector description) is dropped", () => {
+    // A name picked out of "... Contributor, and Someone ..." leaves description
+    // "and" and no combat/skills/spells — not a real actor.
+    const cs = parseCocCharacters(
+      "Contributor, and STR 40 CON 50 SIZ 50 DEX 45 INT 30 APP 30 POW 30 EDU 40 SAN 30 HP 10 " +
+        "DB: 0 Build: 0 Move: 8 MP: 6",
+    );
+    assert.deepEqual(cs, []);
+  });
+
+  test("a minimal creature (only characteristics) with a real description is kept", () => {
+    const [c] = parseCocCharacters(
+      "The Sphinx, ancient guardian STR 90 CON 90 SIZ 120 DEX 40 INT 80 APP — POW 90 EDU — SAN — HP 21 " +
+        "DB: +3D6 Build: 4 Move: 8 MP: 18",
+    );
+    assert.equal(c.name, "The Sphinx");
+    assert.equal(c.description, "ancient guardian");
+  });
 });

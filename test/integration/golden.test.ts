@@ -85,3 +85,15 @@ describe("golden snapshots — parser output is unchanged", () => {
     });
   }
 });
+
+describe("no actor falls back to an Unknown name", () => {
+  for (const base of FILES) {
+    test(base, async (t) => {
+      const pdfBuf = await readOrNull(`fixtures/${base}.pdf`);
+      if (!pdfBuf) return t.skip("fixture PDF missing");
+      const { actors } = await processPDF(new Uint8Array(pdfBuf));
+      const unknown = actors.filter((a) => a.name === "Unknown").length;
+      assert.equal(unknown, 0, `${unknown} actor(s) named "Unknown" in ${base}`);
+    });
+  }
+});

@@ -255,7 +255,30 @@ export function parseCocCharacters(
     );
   });
 
-  return characters;
+  return characters
+    .map((c) => ({ ...c, name: cleanActorName(c.name) }))
+    .filter((c) => !isSpuriousActor(c));
+}
+
+// A block that isn't really an actor: its name was picked out of a prose/credits
+// list ("... John D. Rateliff, and Dean ..."), leaving a bare-connector
+// description and an otherwise empty block (only characteristics — no combat,
+// skills, or spells). A genuine minimal creature has a real description.
+function isSpuriousActor(c: CocCharacter): boolean {
+  const empty =
+    c.combat.length === 0 &&
+    Object.keys(c.skills).length === 0 &&
+    c.spells.length === 0;
+  return (
+    empty && /^(?:and|or|the|a|an|but|of|with|to|for)$/i.test((c.description ?? "").trim())
+  );
+}
+
+// Final tidy-up of an actor's name.
+function cleanActorName(name: string): string {
+  // Bestiary entries carry a "(page NNN)" cross-reference in their heading
+  // ("SHANTAK (page 306)", the unclosed "BYAKHEE (page 283"); drop it.
+  return name.replace(/\s*\(\s*page\s+\d+\s*\)?/i, "").trim();
 }
 
 // ---------------------------------------------------------------------------
@@ -376,6 +399,11 @@ function headerFromChunks(
 
   const parsed = parseNameRun(selected.map(lineText).join(" "));
   if (!parsed || !parsed.name) return null;
+  // A boxed sidebar title ("SPELL: WAVE OF OBLIVION") is not the NPC's name — the
+  // real header sits elsewhere (found by parseHeader's wide age search). pdf.js
+  // reads such a floated box after the column it overlaps, so it lands right
+  // before the stat block and would otherwise win.
+  if (/^spells?\b/i.test(parsed.name)) return null;
   return { ...parsed, headerStart: selected[0][0].start };
 }
 
@@ -532,6 +560,34 @@ function parseHeader(
       description,
       headerStart: nameStartAbs(text, commaAbs, name),
     };
+  }
+
+  // Cross-page / boxed layout: a "<Name>, age N, description" header can sit far
+  // from STR when a sidebar box (a signature spell, etc.) is wedged between it and
+  // the stat block (the box is read after the column it floats over, so it lands
+  // right before STR). The near window found no age header, so search the whole
+  // block window for the last explicit "..., age N, ..." one.
+  const wideAge = [
+    ...text
+      .slice(leftBound, strIndex)
+      .matchAll(/,\s*(?:age|appears)\s+(\d{1,3})\+?\s*,/gi),
+  ].pop();
+  if (wideAge) {
+    const commaAbs = leftBound + (wideAge.index ?? 0);
+    const descAbs = commaAbs + wideAge[0].length;
+    const name = extractName(
+      text.slice(Math.max(leftBound, commaAbs - nameLookback), commaAbs),
+    );
+    if (name && looksLikeProperName(name)) {
+      // The descriptor runs until the backstory's first capitalised word.
+      const desc = (text.slice(descAbs).match(/^\s*([^.A-Z]*)/) || [])[1] ?? "";
+      return {
+        name,
+        age: Number(wideAge[1]),
+        description: trimDescription(desc),
+        headerStart: nameStartAbs(text, commaAbs, name),
+      };
+    }
   }
 
   // Shared-profile stat blocks name the group just before the instruction, e.g.
