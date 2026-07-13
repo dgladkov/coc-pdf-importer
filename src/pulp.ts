@@ -159,12 +159,201 @@ export function buildPulpTalents(text: string, source: string): any[] {
   return parsePulpTalents(text).map((t) => pulpTalentItem(t, source));
 }
 
-// Build every pulp item document a rulebook's text yields (talents now;
-// archetypes to follow). Each builder is guarded by its own specific section
-// header, so a document with no pulp reference tables produces no items — that
-// is how the importer decides a document "has items" without false positives.
+// --- Archetypes ------------------------------------------------------------
+// Archetypes are prose sections (a name heading, a description, then an
+// "Adjustments" bullet block), not a table. Parsing anchors on the fixed,
+// alphabetically-ordered name list and the 22 "Adjustments" markers — a niche,
+// book-specific approach the user signed off on for this import.
+
+const ARCHETYPE_NAMES = [
+  "Adventurer", "Beefcake", "Bon Vivant", "Cold Blooded", "Dreamer", "Egghead",
+  "Explorer", "Femme Fatale", "Grease Monkey", "Hard Boiled", "Harlequin",
+  "Hunter", "Mystic", "Outsider", "Rogue", "Scholar", "Seeker", "Sidekick",
+  "Steadfast", "Swashbuckler", "Thrill Seeker", "Two-Fisted",
+];
+
+const CORE_CHARS = ["str", "con", "siz", "dex", "app", "int", "pow", "edu"];
+const TALENT_WORD_NUM: Record<string, number> = { one: 1, two: 2, three: 3, four: 4 };
+
+export interface PulpArchetype {
+  name: string;
+  description: string;
+  coreCharacteristics: string[]; // lowercase keys, e.g. ["con"] or ["dex","app"]
+  bonusPoints: number;
+  talents: number;
+  skills: string[]; // skill names as printed, e.g. "Fighting (Brawl)"
+  suggestedOccupations: string;
+  suggestedTraits: string;
+}
+
+const escapeReChars = (s: string) => s.replace(/[.*+?^${}()|[\]\\-]/g, "\\$&");
+// Name alternation tolerant of the margin index's hyphen-joined variants
+// ("Cold-Blooded" vs the heading's "Cold Blooded").
+const ARCH_NAME_ALT = [...ARCHETYPE_NAMES]
+  .sort((a, b) => b.length - a.length)
+  .map((n) => escapeReChars(n).replace(/ /g, "[ -]"))
+  .join("|");
+const ARCH_NAME_START = new RegExp("^(?:" + ARCH_NAME_ALT + ")\\b");
+const ARCH_MARGIN_RUN = new RegExp("(?:\\b(?:" + ARCH_NAME_ALT + ")\\b[ ,]*){2,}", "g");
+
+// Kebab-case a skill name for its CoCID, mirroring CoC7Utilities.toKebabCase so
+// "Fighting (Brawl)" -> "i.skill.fighting-brawl" matches what the system stores.
+function toKebabCase(s: string): string {
+  const m = (s ?? "").match(
+    /[A-Z]{2,}(?=[A-Z][a-z]+[0-9]*|\b)|[A-Z]?[a-z]+[0-9]*|[A-Z]|[0-9]+/g,
+  );
+  return m ? m.join("-").toLowerCase() : "";
+}
+
+// Drop page-running headers/footers and illustration credits that PDF extraction
+// interleaves into the archetype prose.
+function stripArchetypeArtifacts(text: string): string {
+  return text
+    .replace(/\s*\d+\s+CREATING PULP HEROES\s*/g, " ")
+    .replace(/s h o o t i n g d e e p o n e s\s+\d+\s+CHAPTER \d+\s*/g, " ")
+    .replace(/\s*Archetypes s by Chris Lackey\s*/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function cleanArchetypeDescription(d: string): string {
+  d = d
+    .replace(/\bPULP ARCHETYPES\b/g, " ")
+    .replace(ARCH_MARGIN_RUN, " ") // strip margin-index name runs
+    .replace(/\s+/g, " ")
+    .trim();
+  // Prose ends in a sentence terminator; drop any trailing margin/header fragment
+  // (which carries no punctuation) after the final one.
+  const m = d.match(/^.*[.!?]["”'’]?/s);
+  return (m ? m[0] : d).trim();
+}
+
+// The heading of `name` before `before`: its last Title-Case occurrence that
+// begins the description prose — not one followed by another archetype name or
+// immediately by "Adjustments" (both mark the margin index / an illustration
+// caption). Archetype prose refers to archetypes in lowercase, so a Title-Case
+// occurrence is always a heading, margin entry, or caption.
+function archetypeHeading(
+  text: string,
+  name: string,
+  before: number,
+): RegExpExecArray | null {
+  const re = new RegExp("\\b" + escapeReChars(name) + "\\b", "g");
+  let last: RegExpExecArray | null = null;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) && m.index < before) {
+    const after = text.slice(m.index + name.length).trimStart();
+    if (!ARCH_NAME_START.test(after) && !/^Adjustments\b/.test(after)) last = m;
+  }
+  return last;
+}
+
+const archField = (body: string, re: RegExp) =>
+  (body.match(re) || [])[1]?.trim() ?? "";
+
+// Parse the pulp archetype entries. Anchors on the "Adjustments • Core
+// characteristic" markers (in the book's alphabetical order, matched to the name
+// list) and returns [] when the section is absent, so non-pulp documents yield
+// nothing.
+export function parsePulpArchetypes(rawText: string): PulpArchetype[] {
+  const text = stripArchetypeArtifacts(rawText);
+  const adj = [...text.matchAll(/\bAdjustments\s+•\s*Core characteristic/g)].map(
+    (m) => m.index!,
+  );
+  if (adj.length === 0) return [];
+
+  const count = Math.min(adj.length, ARCHETYPE_NAMES.length);
+  const heads = ARCHETYPE_NAMES.slice(0, count).map((name, i) =>
+    archetypeHeading(text, name, adj[i]),
+  );
+
+  const archetypes: PulpArchetype[] = [];
+  for (let i = 0; i < count; i++) {
+    const name = ARCHETYPE_NAMES[i];
+    const nameEnd = heads[i] ? heads[i]!.index + name.length : adj[i];
+    const description = cleanArchetypeDescription(text.slice(nameEnd, adj[i]));
+    // The bullets run from this Adjustments to the next entry's heading (or a
+    // bounded window for the last one).
+    const bulletsEnd =
+      i + 1 < count && heads[i + 1]
+        ? heads[i + 1]!.index
+        : Math.min(adj[i] + 1600, text.length);
+    const body = text.slice(adj[i], bulletsEnd);
+
+    const coreRaw = archField(body, /Core characteristic:\s*([^•]*)/);
+    const coreCharacteristics = CORE_CHARS.filter((c) =>
+      new RegExp("\\b" + c.toUpperCase() + "\\b").test(coreRaw),
+    );
+    const bonusPoints = Number(archField(body, /Add\s+(\d+)\s+bonus points/)) || 100;
+    const skills = archField(body, /following skills:\s*([^•]*)/)
+      .replace(/\.\s*$/, "")
+      .split(/,\s*/)
+      .map((s) => s.replace(/^and\s+/i, "").trim())
+      .filter(Boolean);
+    const suggestedOccupations = archField(
+      body,
+      /Suggested occupations:\s*([^•]*)/,
+    ).replace(/\.\s*$/, "");
+    const talents =
+      TALENT_WORD_NUM[
+        archField(body, /Talents:\s*(?:any\s+)?(\w+)/).toLowerCase()
+      ] ?? 2;
+    const suggestedTraits = archField(
+      body,
+      /Suggested traits:\s*([^•]*)/,
+    ).replace(/\.\s*$/, "");
+
+    archetypes.push({
+      name,
+      description,
+      coreCharacteristics,
+      bonusPoints,
+      talents,
+      skills,
+      suggestedOccupations,
+      suggestedTraits,
+    });
+  }
+  return archetypes;
+}
+
+// A CoC7 "archetype" item document (schema per E:/export_archetype.json). The
+// bonus-point skills become CoCID itemKeys; the icon is assigned at creation.
+export function pulpArchetypeItem(a: PulpArchetype, source: string): any {
+  const coreCharacteristics = Object.fromEntries(
+    CORE_CHARS.map((c) => [c, a.coreCharacteristics.includes(c)]),
+  );
+  return {
+    name: a.name,
+    type: "archetype",
+    system: {
+      description: { value: escapeHtml(a.description), keeper: "" },
+      source,
+      bonusPoints: a.bonusPoints,
+      coreCharacteristics,
+      coreCharacteristicsFormula: { enabled: true, value: "(1D6+13)*5" },
+      suggestedOccupations: escapeHtml(a.suggestedOccupations),
+      suggestedTraits: escapeHtml(a.suggestedTraits),
+      talents: a.talents,
+      itemDocuments: [],
+      itemKeys: a.skills.map((s) => "i.skill." + toKebabCase(s)),
+    },
+  };
+}
+
+export function buildPulpArchetypes(text: string, source: string): any[] {
+  return parsePulpArchetypes(text).map((a) => pulpArchetypeItem(a, source));
+}
+
+// Build every pulp item document a rulebook's text yields. Each builder is
+// guarded by its own specific section header/structure, so a document with none
+// of them produces no items — that is how the importer decides a document "has
+// items" without false positives.
 export function buildPulpItems(text: string, source: string): any[] {
-  return [...buildPulpTalents(text, source)];
+  return [
+    ...buildPulpTalents(text, source),
+    ...buildPulpArchetypes(text, source),
+  ];
 }
 
 // The subfolder each item type is filed under, within the document's Item folder.

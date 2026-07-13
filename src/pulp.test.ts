@@ -7,6 +7,9 @@ import {
   parsePulpTalents,
   pulpTalentItem,
   buildPulpTalents,
+  parsePulpArchetypes,
+  pulpArchetypeItem,
+  buildPulpItems,
   createPulpItems,
 } from "./pulp.ts";
 
@@ -152,6 +155,100 @@ describe("buildPulpTalents", () => {
     assert.equal(items.length, 2);
     assert.equal(items[0].system.type.physical, true);
     assert.equal(items[1].system.type.combat, true);
+  });
+});
+
+// --- archetypes ------------------------------------------------------------
+// Content is generic placeholder text; only the archetype names (a fixed label
+// set the parser anchors on) and the bullet framing are structural.
+
+const ARCH_TEXT =
+  "Adventurer Generic flavor one, ending here. Adjustments " +
+  "• Core characteristic: choose either DEX or APP. " +
+  "• Add 100 bonus points divided among any of the following skills: Climb, Jump, Swim. " +
+  "• Suggested occupations: Job A, Job B. " +
+  "• Talents: any two. " +
+  "• Suggested traits: brave, bold. " +
+  "Beefcake Generic flavor two, ending here. Adjustments " +
+  "• Core characteristic: STR. " +
+  "• Add 100 bonus points divided among any of the following skills: Climb, Throw. " +
+  "• Suggested occupations: Job C. " +
+  "• Talents: any three. " +
+  "• Suggested traits: strong, tough.";
+
+describe("parsePulpArchetypes", () => {
+  test("parses name, description, core characteristics, skills, occupations, traits", () => {
+    const [adv, beef] = parsePulpArchetypes(ARCH_TEXT);
+    assert.equal(adv.name, "Adventurer");
+    assert.equal(adv.description, "Generic flavor one, ending here.");
+    assert.deepEqual(adv.coreCharacteristics, ["dex", "app"]); // "choose either"
+    assert.equal(adv.bonusPoints, 100);
+    assert.deepEqual(adv.skills, ["Climb", "Jump", "Swim"]);
+    assert.equal(adv.talents, 2);
+    assert.equal(adv.suggestedOccupations, "Job A, Job B");
+    assert.equal(adv.suggestedTraits, "brave, bold");
+    assert.equal(beef.name, "Beefcake");
+    assert.deepEqual(beef.coreCharacteristics, ["str"]);
+    assert.equal(beef.talents, 3); // "any three"
+    assert.deepEqual(beef.skills, ["Climb", "Throw"]);
+  });
+
+  test("returns [] when the archetype section is absent", () => {
+    assert.deepEqual(parsePulpArchetypes("No archetypes here, just prose."), []);
+  });
+
+  test("strips margin-index name runs and page artifacts from the description", () => {
+    const t =
+      "Adventurer Real prose here. Beefcake Bon Vivant Cold-Blooded 16 CREATING PULP HEROES " +
+      "Adjustments • Core characteristic: DEX. " +
+      "• Add 100 bonus points divided among any of the following skills: Climb. " +
+      "• Suggested occupations: X. • Talents: any two. • Suggested traits: brave.";
+    const [a] = parsePulpArchetypes(t);
+    assert.equal(a.description, "Real prose here.");
+  });
+});
+
+describe("pulpArchetypeItem", () => {
+  test("builds an archetype item matching the CoC7 schema", () => {
+    const item = pulpArchetypeItem(
+      {
+        name: "Hard Boiled",
+        description: "Tough & <streetwise>.",
+        coreCharacteristics: ["con"],
+        bonusPoints: 100,
+        talents: 2,
+        skills: ["Fighting (Brawl)", "Law", "Art/Craft (any)"],
+        suggestedOccupations: "Gangster, Boxer",
+        suggestedTraits: "cynical, violent",
+      },
+      "Test Source",
+    );
+    assert.equal(item.type, "archetype");
+    assert.equal(item.name, "Hard Boiled");
+    assert.equal(item.img, undefined); // icon assigned at creation
+    assert.equal(item.system.source, "Test Source");
+    assert.equal(item.system.bonusPoints, 100);
+    assert.equal(item.system.talents, 2);
+    assert.equal(item.system.coreCharacteristics.con, true);
+    assert.equal(item.system.coreCharacteristics.str, false);
+    assert.equal(item.system.description.value, "Tough &amp; &lt;streetwise&gt;.");
+    assert.deepEqual(item.system.itemKeys, [
+      "i.skill.fighting-brawl",
+      "i.skill.law",
+      "i.skill.art-craft-any",
+    ]);
+    assert.equal(item.system.coreCharacteristicsFormula.value, "(1D6+13)*5");
+    assert.deepEqual(item.system.itemDocuments, []);
+  });
+});
+
+describe("buildPulpItems", () => {
+  test("includes both talents and archetypes from one document", () => {
+    const text =
+      genTable(3, "PHYSICAL", [[1, "Alpha", "a."]]) + " " + ARCH_TEXT;
+    const items = buildPulpItems(text, "Src");
+    assert.ok(items.some((i) => i.type === "talent"));
+    assert.ok(items.some((i) => i.type === "archetype"));
   });
 });
 
