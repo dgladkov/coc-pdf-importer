@@ -1,4 +1,14 @@
 import * as pdfjs from "pdfjs-dist";
+import { parsePulpItems } from "./pulp.ts";
+import type { PulpItem } from "./pulp.ts";
+
+// A processed document: the actor stat blocks plus any pulp reference items
+// (talents, archetypes) as internal structures (not yet Foundry documents). A
+// non-pulp PDF yields items: [].
+export interface ProcessedDocument {
+  actors: CocCharacter[];
+  items: PulpItem[];
+}
 
 export type CharacteristicName =
   "STR" | "CON" | "SIZ" | "DEX" | "INT" | "APP" | "POW" | "EDU" | "SAN" | "HP";
@@ -2262,17 +2272,32 @@ async function processPage(
   });
 }
 
-// Extraction keeps the font size (height) of each run of text. Body text, NPC
-// name headings, and section headings sit at distinct heights in these books,
-// which lets us recover the character name even when it is far from the stats.
-export async function processPDF(data: Uint8Array): Promise<CocCharacter[]> {
+// Read every page's text items once, in parallel. This raw per-page item list is
+// the shared representation both parsers work from: the actor parser merges it
+// into font/height runs, the item parser flattens it to plain text.
+async function extractPages(data: Uint8Array): Promise<RawItem[][]> {
   const pdf = await pdfjs.getDocument({ data }).promise;
   const pages: Promise<RawItem[]>[] = [];
   for (let i = 1; i <= pdf.numPages; i++) {
     pages.push(processPage(pdf, i));
   }
-  const pageItems = await Promise.all(pages);
+  return Promise.all(pages);
+}
 
+// The full plain text of the document — every item's string joined, whitespace
+// collapsed. This is what the pulp item parser reads (headings, tables, and prose
+// in reading order; no font/height needed).
+function pagesToText(pageItems: RawItem[][]): string {
+  let out = "";
+  for (const items of pageItems) out += " " + items.map((it) => it.str).join(" ");
+  return out.replace(/\s+/g, " ").trim();
+}
+
+// Parse actor stat blocks from the raw page items. Extraction keeps the font size
+// (height) of each run: body text, NPC name headings, and section headings sit at
+// distinct heights in these books, which lets us recover the character name even
+// when it is far from the stats.
+function parseActors(pageItems: RawItem[][]): CocCharacter[] {
   // Merge consecutive same-(font, height) items into runs, but start a new run
   // at each line break (hasEOL) or page boundary, recording whether the run
   // begins a new line. This keeps a same-font heading on its own line (e.g. a
@@ -2342,4 +2367,16 @@ export async function processPDF(data: Uint8Array): Promise<CocCharacter[]> {
   }
 
   return parseCocCharacters(parts.join(""), chunks);
+}
+
+// Process a document PDF into its actors and its pulp reference items. Reads every
+// page once into the shared page-item representation, then runs the actor parser
+// and the (Foundry-free) item parser over it independently. Neither this nor the
+// parsers touch Foundry — turning items into world documents is the importer's job.
+export async function processPDF(data: Uint8Array): Promise<ProcessedDocument> {
+  const pageItems = await extractPages(data);
+  return {
+    actors: parseActors(pageItems),
+    items: parsePulpItems(pagesToText(pageItems)),
+  };
 }

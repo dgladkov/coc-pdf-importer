@@ -21,10 +21,10 @@ async function load(file: string) {
         `copyrighted PDFs — see fixtures/README.md for the list to add.`,
     );
   }
-  return processPDF(new Uint8Array(buf));
+  return (await processPDF(new Uint8Array(buf))).actors;
 }
 
-function byName(chars: Awaited<ReturnType<typeof processPDF>>, name: string) {
+function byName(chars: Awaited<ReturnType<typeof load>>, name: string) {
   const c = chars.find((c) => c.name === name);
   assert.ok(c, `character "${name}" not found`);
   return c;
@@ -34,7 +34,7 @@ function byName(chars: Awaited<ReturnType<typeof processPDF>>, name: string) {
 // Dead Light & Other Dark Turns — standard "Name, age N, desc" format
 // ---------------------------------------------------------------------------
 describe("Dead Light", () => {
-  let chars: Awaited<ReturnType<typeof processPDF>>;
+  let chars: Awaited<ReturnType<typeof load>>;
   before(async () => {
     chars = await load("CHA23159_-_Dead_Light_and_Other_Dark_Turns.pdf");
   });
@@ -142,7 +142,7 @@ describe("Dead Light", () => {
 // Masks of Nyarlathotep — Luck, multi-attack combat, Languages, group tables
 // ---------------------------------------------------------------------------
 describe("Masks of Nyarlathotep", () => {
-  let chars: Awaited<ReturnType<typeof processPDF>>;
+  let chars: Awaited<ReturnType<typeof load>>;
   before(async () => {
     chars = await load(
       "CHA23153_-_Masks_of_Nyarlathotep_-_Keeper_Reference_Booklet_v3.pdf",
@@ -347,7 +347,7 @@ describe("Masks of Nyarlathotep", () => {
 // Core Rulebook scenarios — heading-named groups with letter-spaced labels
 // ---------------------------------------------------------------------------
 describe("Core Rulebook scenarios", () => {
-  let chars: Awaited<ReturnType<typeof processPDF>>;
+  let chars: Awaited<ReturnType<typeof load>>;
   before(async () => {
     chars = await load("CHA23178-Book3-Scenarios-2026-download.pdf");
   });
@@ -386,7 +386,7 @@ describe("Core Rulebook scenarios", () => {
 // Gateways to Terror — "Name: <Archetype>, age N" pre-generated format
 // ---------------------------------------------------------------------------
 describe("Gateways to Terror", () => {
-  let chars: Awaited<ReturnType<typeof processPDF>>;
+  let chars: Awaited<ReturnType<typeof load>>;
   before(async () => {
     chars = await load("CHA23140_-_Gateways_to_Terror_1.1.pdf");
   });
@@ -433,7 +433,7 @@ describe("Gateways to Terror", () => {
 // Doors to Darkness — ALL-CAPS names, "(3D6 x 5)" roll formulas
 // ---------------------------------------------------------------------------
 describe("Doors to Darkness", () => {
-  let chars: Awaited<ReturnType<typeof processPDF>>;
+  let chars: Awaited<ReturnType<typeof load>>;
   before(async () => {
     chars = await load("CHA23148_-_Doors_to_Darkness_v1.1.pdf");
   });
@@ -463,7 +463,7 @@ describe("Doors to Darkness", () => {
 // Quick-Start Rules — "(Hard NN/Extreme NN)" profiles + maneuver attacks
 // ---------------------------------------------------------------------------
 describe("Quick-Start Rules", () => {
-  let chars: Awaited<ReturnType<typeof processPDF>>;
+  let chars: Awaited<ReturnType<typeof load>>;
   before(async () => {
     chars = await load(
       "CHA23131 Call of Cthulhu 7th Edition Quick-Start Rules.pdf",
@@ -532,7 +532,7 @@ describe("Quick-Start Rules", () => {
 // The Lightless Beacon — verbose prose combat (effect descriptions inline)
 // ---------------------------------------------------------------------------
 describe("The Lightless Beacon", () => {
-  let chars: Awaited<ReturnType<typeof processPDF>>;
+  let chars: Awaited<ReturnType<typeof load>>;
   before(async () => {
     chars = await load("The Lightless Beacon - Call of Cthulhu.pdf");
   });

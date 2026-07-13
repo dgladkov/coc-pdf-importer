@@ -1,9 +1,14 @@
 // Ad-hoc importer for Pulp Cthulhu rulebook reference content — currently the
 // pulp talents. This is deliberately separate from the actor/stat-block parser
 // in process.ts: it reads the book's fixed reference *tables*, not per-NPC stat
-// blocks, so it gets its own extraction and parsing rather than complicating the
-// general path. See E:/export_trait.json for the target "talent" item schema.
-import * as pdfjs from "pdfjs-dist";
+// blocks, so it gets its own parsing rather than complicating the general path.
+// See E:/export_trait.json for the target "talent" item schema.
+//
+// This module is pure: it parses text into internal item structures (PulpItem)
+// and never touches pdf.js or the Foundry API. It keeps source-faithful data —
+// e.g. skill names, not resolved CoCIDs. The text comes from process.ts (which
+// reads the PDF once); turning these into Foundry documents and creating them in
+// the world is the importer's job (see document.ts).
 
 export type TalentCategory =
   | "physical"
@@ -56,6 +61,31 @@ function cleanDescription(s: string): string {
     .trim();
 }
 
+// Upper-case the first letter. The book lists talent descriptions as lowercase
+// sentence fragments (they follow "Name : " in the table); this makes each read
+// as a sentence.
+function capitalizeFirst(s: string): string {
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+}
+
+// Split a comma-separated list ("Agency Detective, Bank Robber, and Ranger") into
+// its trimmed entries, dropping a trailing "." and a leading "and", and closing
+// the spurious space PDF extraction leaves inside a compound ("Gentleman/ Lady",
+// "name- dropper").
+function splitCommaList(raw: string): string[] {
+  return raw
+    .replace(/\.\s*$/, "")
+    .split(/,\s*/)
+    .map((s) =>
+      s
+        .replace(/^and\s+/i, "")
+        .replace(/\/\s+/g, "/")
+        .replace(/([A-Za-z])-\s+(?=[A-Za-z])/g, "$1-")
+        .trim(),
+    )
+    .filter(Boolean);
+}
+
 // Parse the four pulp player-talent tables into their 40 talents. Tolerant of the
 // tables appearing on different pages and in any order; each table yields its
 // rows 1..10 in sequence and stops as soon as the roll numbering breaks (which
@@ -81,82 +111,11 @@ export function parsePulpTalents(text: string): PulpTalent[] {
       talents.push({
         name: m[2].trim(),
         category,
-        description: cleanDescription(m[3]),
+        description: capitalizeFirst(cleanDescription(m[3])),
       });
     }
   }
   return talents;
-}
-
-// The full plain text of a PDF: every page's runs joined with spaces and
-// whitespace collapsed. Enough for the reference tables (which are single-column
-// and read in order); the actor parser's font/height run-merging is unnecessary
-// here.
-export async function extractPdfText(data: Uint8Array): Promise<string> {
-  const pdf = await pdfjs.getDocument({ data }).promise;
-  let out = "";
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    out +=
-      " " + (content.items as { str?: string }[]).map((it) => it.str ?? "").join(" ");
-  }
-  return out.replace(/\s+/g, " ").trim();
-}
-
-// The talent item's category flags: exactly one of the four player categories is
-// set (the schema also defines basic/insane/other, left false for player talents).
-const TALENT_TYPE_FLAGS = [
-  "physical",
-  "mental",
-  "combat",
-  "miscellaneous",
-  "basic",
-  "insane",
-  "other",
-] as const;
-
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-// The book lists talent descriptions as lowercase sentence fragments (they follow
-// "Name : " in the table); upper-case the first letter so each reads as a sentence.
-function capitalizeFirst(text: string): string {
-  return text ? text.charAt(0).toUpperCase() + text.slice(1) : text;
-}
-
-// A CoC7 "talent" item document for one parsed talent (schema per
-// E:/export_trait.json). No `img`: the icon isn't source data, so it's assigned
-// at creation time (see createPulpItems). The description carries only the
-// (escaped) source text, unwrapped — as the actor importer does, not the
-// Foundry-export "<p>...</p>" convention.
-export function pulpTalentItem(talent: PulpTalent, source: string): any {
-  const type = Object.fromEntries(
-    TALENT_TYPE_FLAGS.map((flag) => [flag, flag === talent.category]),
-  );
-  return {
-    name: talent.name,
-    type: "talent",
-    system: {
-      source,
-      description: {
-        value: escapeHtml(capitalizeFirst(talent.description)),
-        notes: "",
-        keeper: "",
-      },
-      type,
-      adjustments: [],
-    },
-  };
-}
-
-// Parse and build all pulp talent item documents from a rulebook's text.
-export function buildPulpTalents(text: string, source: string): any[] {
-  return parsePulpTalents(text).map((t) => pulpTalentItem(t, source));
 }
 
 // --- Archetypes ------------------------------------------------------------
@@ -175,6 +134,20 @@ const ARCHETYPE_NAMES = [
 const CORE_CHARS = ["str", "con", "siz", "dex", "app", "int", "pow", "edu"];
 const TALENT_WORD_NUM: Record<string, number> = { one: 1, two: 2, three: 3, four: 4 };
 
+// A few source skill lists carry non-canonical names; normalize each to the real
+// system skill name(s). An entry can expand to more than one ("Firearms (Rifle
+// and/or Handgun)" is really two firearms skills).
+const SKILL_ALIASES: Record<string, string[]> = {
+  "Language Other (Any)": ["Language (Any)"],
+  "Firearms (Rifle and/or Handgun)": [
+    "Firearms (Rifle/Shotgun)",
+    "Firearms (Handgun)",
+  ],
+  Cryptography: ["Science (Cryptography)"],
+  Navigation: ["Navigate"],
+  Photography: ["Art/Craft (Photography)"],
+};
+
 export interface PulpArchetype {
   name: string;
   description: string;
@@ -182,8 +155,8 @@ export interface PulpArchetype {
   bonusPoints: number;
   talents: number;
   skills: string[]; // skill names as printed, e.g. "Fighting (Brawl)"
-  suggestedOccupations: string;
-  suggestedTraits: string;
+  suggestedOccupations: string[];
+  suggestedTraits: string[];
 }
 
 const escapeReChars = (s: string) => s.replace(/[.*+?^${}()|[\]\\-]/g, "\\$&");
@@ -196,30 +169,34 @@ const ARCH_NAME_ALT = [...ARCHETYPE_NAMES]
 const ARCH_NAME_START = new RegExp("^(?:" + ARCH_NAME_ALT + ")\\b");
 const ARCH_MARGIN_RUN = new RegExp("(?:\\b(?:" + ARCH_NAME_ALT + ")\\b[ ,]*){2,}", "g");
 
-// Kebab-case a skill name for its CoCID, mirroring CoC7Utilities.toKebabCase so
-// "Fighting (Brawl)" -> "i.skill.fighting-brawl" matches what the system stores.
-function toKebabCase(s: string): string {
-  const m = (s ?? "").match(
-    /[A-Z]{2,}(?=[A-Z][a-z]+[0-9]*|\b)|[A-Z]?[a-z]+[0-9]*|[A-Z]|[0-9]+/g,
-  );
-  return m ? m.join("-").toLowerCase() : "";
-}
-
 // Drop page-running headers/footers and illustration credits that PDF extraction
 // interleaves into the archetype prose.
 function stripArchetypeArtifacts(text: string): string {
-  return text
-    .replace(/\s*\d+\s+CREATING PULP HEROES\s*/g, " ")
-    .replace(/s h o o t i n g d e e p o n e s\s+\d+\s+CHAPTER \d+\s*/g, " ")
-    .replace(/\s*Archetypes s by Chris Lackey\s*/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return (
+    text
+      .replace(/\s*\d+\s+CREATING PULP HEROES\s*/g, " ")
+      .replace(/s h o o t i n g d e e p o n e s\s+\d+\s+CHAPTER \d+\s*/g, " ")
+      .replace(/\s*Archetypes s by Chris Lackey\s*/g, " ")
+      // The two-column chapter intro (dropcap paragraph, the "Creating Pulp
+      // Heroes" steps, the "Step One" heading, and the plate credit) is
+      // interleaved by the flat reading order into the first archetype's
+      // (Adventurer's) description — remove that whole block.
+      .replace(
+        /\bI\s*n Pulp Cthulhu\s*,\s*investigators are called heroes[\s\S]*?Manuel Leza moreno/,
+        " ",
+      )
+      .replace(/\s+/g, " ")
+      .trim()
+  );
 }
 
 function cleanArchetypeDescription(d: string): string {
   d = d
     .replace(/\bPULP ARCHETYPES\b/g, " ")
     .replace(ARCH_MARGIN_RUN, " ") // strip margin-index name runs
+    .replace(/\(\s+/g, "(") // undo PDF spacing artifacts around punctuation
+    .replace(/\s+\)/g, ")")
+    .replace(/\s+([,;])/g, "$1")
     .replace(/\s+/g, " ")
     .trim();
   // Prose ends in a sentence terminator; drop any trailing margin/header fragment
@@ -271,7 +248,7 @@ export function parsePulpArchetypes(rawText: string): PulpArchetype[] {
   for (let i = 0; i < count; i++) {
     const name = ARCHETYPE_NAMES[i];
     const nameEnd = heads[i] ? heads[i]!.index + name.length : adj[i];
-    const description = cleanArchetypeDescription(text.slice(nameEnd, adj[i]));
+    let description = cleanArchetypeDescription(text.slice(nameEnd, adj[i]));
     // The bullets run from this Adjustments to the next entry's heading (or a
     // bounded window for the last one).
     const bulletsEnd =
@@ -285,23 +262,37 @@ export function parsePulpArchetypes(rawText: string): PulpArchetype[] {
       new RegExp("\\b" + c.toUpperCase() + "\\b").test(coreRaw),
     );
     const bonusPoints = Number(archField(body, /Add\s+(\d+)\s+bonus points/)) || 100;
-    const skills = archField(body, /following skills:\s*([^•]*)/)
-      .replace(/\.\s*$/, "")
-      .split(/,\s*/)
-      .map((s) => s.replace(/^and\s+/i, "").trim())
-      .filter(Boolean);
-    const suggestedOccupations = archField(
-      body,
-      /Suggested occupations:\s*([^•]*)/,
-    ).replace(/\.\s*$/, "");
+    // The skill list may carry a trailing "; <clause>" note (e.g. Mystic's "if
+    // the Psychic talent is taken, allocate skill points to the chosen psychic
+    // skill(s)"). Split it off and fold it into the description rather than
+    // treating the clause as skills.
+    const skillsRaw = archField(body, /following skills:\s*([^•]*)/);
+    const semicolon = skillsRaw.indexOf(";");
+    const skillNote =
+      semicolon >= 0
+        ? skillsRaw.slice(semicolon + 1).replace(/\.\s*$/, "").trim()
+        : "";
+    if (skillNote) description += " " + capitalizeFirst(skillNote) + ".";
+    // Skill names are tidied ("(any)" -> "(Any)") and normalized to canonical
+    // system skills — a couple of non-canonical source entries are mapped or
+    // split into two (see SKILL_ALIASES).
+    const skills = splitCommaList(
+      semicolon >= 0 ? skillsRaw.slice(0, semicolon) : skillsRaw,
+    )
+      .map((s) => s.replace(/\(any\)/gi, "(Any)"))
+      .flatMap((s) => SKILL_ALIASES[s] ?? [s]);
+    const suggestedOccupations = splitCommaList(
+      archField(body, /Suggested occupations:\s*([^•]*)/),
+    );
     const talents =
       TALENT_WORD_NUM[
         archField(body, /Talents:\s*(?:any\s+)?(\w+)/).toLowerCase()
       ] ?? 2;
-    const suggestedTraits = archField(
-      body,
-      /Suggested traits:\s*([^•]*)/,
-    ).replace(/\.\s*$/, "");
+    // Traits are the last bullet, so bound the list at its ending "." — otherwise
+    // it spills into the following margin index or chapter text.
+    const suggestedTraits = splitCommaList(
+      archField(body, /Suggested traits:\s*([^•.]*)/),
+    );
 
     archetypes.push({
       name,
@@ -317,165 +308,21 @@ export function parsePulpArchetypes(rawText: string): PulpArchetype[] {
   return archetypes;
 }
 
-// A CoC7 "archetype" item document (schema per E:/export_archetype.json). The
-// bonus-point skills become CoCID itemKeys; the icon is assigned at creation.
-export function pulpArchetypeItem(a: PulpArchetype, source: string): any {
-  const coreCharacteristics = Object.fromEntries(
-    CORE_CHARS.map((c) => [c, a.coreCharacteristics.includes(c)]),
-  );
-  return {
-    name: a.name,
-    type: "archetype",
-    system: {
-      description: { value: escapeHtml(a.description), keeper: "" },
-      source,
-      bonusPoints: a.bonusPoints,
-      coreCharacteristics,
-      coreCharacteristicsFormula: { enabled: true, value: "(1D6+13)*5" },
-      suggestedOccupations: escapeHtml(a.suggestedOccupations),
-      suggestedTraits: escapeHtml(a.suggestedTraits),
-      talents: a.talents,
-      itemDocuments: [],
-      itemKeys: a.skills.map((s) => "i.skill." + toKebabCase(s)),
-    },
-  };
-}
+// A parsed pulp item, tagged by kind so the importer can build the matching
+// Foundry document. Both variants hold source-faithful data — e.g. archetype
+// `skills` are the printed names, not resolved CoCIDs; that resolution and all
+// Foundry-schema shaping happen at import (see document.ts).
+export type PulpItem =
+  | ({ kind: "talent" } & PulpTalent)
+  | ({ kind: "archetype" } & PulpArchetype);
 
-export function buildPulpArchetypes(text: string, source: string): any[] {
-  return parsePulpArchetypes(text).map((a) => pulpArchetypeItem(a, source));
-}
-
-// Build every pulp item document a rulebook's text yields. Each builder is
-// guarded by its own specific section header/structure, so a document with none
-// of them produces no items — that is how the importer decides a document "has
-// items" without false positives.
-export function buildPulpItems(text: string, source: string): any[] {
+// Parse every pulp reference item a rulebook's text yields (talents, archetypes).
+// Each parser is guarded by its own specific section header/structure, so a
+// document with none of them yields nothing — that is how the importer decides a
+// document "has items" without false positives.
+export function parsePulpItems(text: string): PulpItem[] {
   return [
-    ...buildPulpTalents(text, source),
-    ...buildPulpArchetypes(text, source),
+    ...parsePulpTalents(text).map((t) => ({ kind: "talent" as const, ...t })),
+    ...parsePulpArchetypes(text).map((a) => ({ kind: "archetype" as const, ...a })),
   ];
-}
-
-// The subfolder each item type is filed under, within the document's Item folder.
-const ITEM_TYPE_FOLDERS: Record<string, string> = {
-  talent: "Talents",
-  archetype: "Archetypes",
-};
-
-// The icon each item type gets at creation time (not part of the parsed source
-// data). A type with no entry keeps Foundry's default icon for that item type.
-const ITEM_TYPE_ICONS: Record<string, string> = {
-  talent: "systems/CoC7/assets/icons/skills.svg",
-};
-
-export interface CreatePulpItemsOptions {
-  /** Name of the parent Item folder — typically the source document's name. */
-  folderName?: string;
-  /** Show a UI notification summarising the result (default true). */
-  notify?: boolean;
-}
-
-export interface CreatePulpItemsResult {
-  created: number;
-  items: any[];
-}
-
-// Create pulp item documents in the world under a "<folderName>" Item folder,
-// one subfolder per item type ("Talents", "Archetypes", ...). Idempotent per
-// subfolder: a re-import replaces same-named items in that subfolder rather than
-// duplicating. (Actors are created separately, at the top level of their own
-// Actor folder — see importDocument.)
-export async function createPulpItems(
-  items: any[],
-  options: CreatePulpItemsOptions = {},
-): Promise<CreatePulpItemsResult> {
-  const result: CreatePulpItemsResult = { created: 0, items: [] };
-  if (items.length === 0) return result;
-
-  const parent = await ensureItemFolder(
-    options.folderName ?? "Pulp Cthulhu",
-    null,
-  );
-
-  // Group by item type so each type lands in its own subfolder.
-  const byType = new Map<string, any[]>();
-  for (const item of items) {
-    const list = byType.get(item.type) ?? [];
-    list.push(item);
-    byType.set(item.type, list);
-  }
-
-  for (const [type, group] of byType) {
-    const folder = await ensureItemFolder(
-      ITEM_TYPE_FOLDERS[type] ?? type,
-      parent?.id ?? null,
-    );
-    const img = ITEM_TYPE_ICONS[type];
-    await removeReplacedItems(folder, group);
-    for (const data of group) {
-      try {
-        const item = await Item.create({
-          ...data,
-          ...(img ? { img } : {}),
-          folder: folder?.id ?? null,
-        });
-        result.items.push(item);
-        result.created++;
-      } catch (err) {
-        console.error(
-          `coc-pdf-importer: failed to create ${type} "${data.name}"`,
-          err,
-        );
-      }
-    }
-  }
-  if (options.notify !== false) {
-    ui.notifications.info(`Imported ${result.created} pulp items.`);
-  }
-  return result;
-}
-
-// Find (by name and parent) or create an Item folder.
-async function ensureItemFolder(
-  name: string,
-  parentId: string | null,
-): Promise<FoundryFolder | null> {
-  const existing = game.folders?.find(
-    (f: any) =>
-      f.name === name &&
-      f.type === "Item" &&
-      (f.folder?.id ?? f.folder ?? null) === parentId,
-  );
-  if (existing) return existing;
-  try {
-    return await Folder.create({ name, type: "Item", folder: parentId });
-  } catch {
-    return null;
-  }
-}
-
-// Delete items already in `folder` whose name matches one about to be imported,
-// so a re-import refreshes them instead of piling up duplicates.
-async function removeReplacedItems(
-  folder: FoundryFolder | null,
-  items: any[],
-): Promise<void> {
-  if (!folder?.id) return;
-  const names = new Set(items.map((i) => i.name));
-  const existing =
-    game.items?.filter(
-      (i) =>
-        ((i.folder as any)?.id ?? i.folder ?? null) === folder.id &&
-        names.has(i.name ?? ""),
-    ) ?? [];
-  for (const item of existing) {
-    try {
-      await item.delete();
-    } catch (err) {
-      console.error(
-        `coc-pdf-importer: failed to replace existing item "${item.name}"`,
-        err,
-      );
-    }
-  }
 }

@@ -8,7 +8,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert";
 import fs from "node:fs/promises";
-import { processDocument } from "../../src/document.ts";
+import { processPDF } from "../../src/process.ts";
 
 // Every fixture is parsed and its output snapshotted under the same base name.
 const FILES = [
@@ -50,7 +50,7 @@ describe("golden snapshots — parser output is unchanged", () => {
       if (!goldenBuf) return t.skip("golden snapshot missing");
       if (!pdfBuf) return t.skip("fixture PDF missing");
 
-      const doc = await processDocument(new Uint8Array(pdfBuf));
+      const doc = await processPDF(new Uint8Array(pdfBuf));
       const actual = JSON.stringify(doc, null, 2);
       const goldenText = goldenBuf.toString("utf8");
       if (actual === goldenText) return;
