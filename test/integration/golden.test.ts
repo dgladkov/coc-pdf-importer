@@ -8,7 +8,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert";
 import fs from "node:fs/promises";
-import { processPDF } from "../../src/process.ts";
+import { processDocument } from "../../src/document.ts";
 
 // Every fixture is parsed and its output snapshotted under the same base name.
 const FILES = [
@@ -50,24 +50,36 @@ describe("golden snapshots — parser output is unchanged", () => {
       if (!goldenBuf) return t.skip("golden snapshot missing");
       if (!pdfBuf) return t.skip("fixture PDF missing");
 
-      const chars = await processPDF(new Uint8Array(pdfBuf));
-      const actual = JSON.stringify(chars, null, 2);
+      const doc = await processDocument(new Uint8Array(pdfBuf));
+      const actual = JSON.stringify(doc, null, 2);
       const goldenText = goldenBuf.toString("utf8");
       if (actual === goldenText) return;
 
-      // Not equal — surface a focused, readable failure.
+      // Not equal — surface a focused, readable failure over actors then items.
       const golden = JSON.parse(goldenText);
       assert.equal(
-        chars.length,
-        golden.length,
-        `character count changed: golden ${golden.length} -> now ${chars.length}`,
+        doc.actors.length,
+        golden.actors.length,
+        `character count changed: golden ${golden.actors.length} -> now ${doc.actors.length}`,
       );
-      const d = firstDiff(chars, golden);
+      const d = firstDiff(doc.actors, golden.actors);
       if (d)
         assert.deepStrictEqual(
-          chars[d.i],
-          golden[d.i],
+          doc.actors[d.i],
+          golden.actors[d.i],
           `character #${d.i} ("${d.name}") differs from golden`,
+        );
+      assert.equal(
+        doc.items.length,
+        golden.items.length,
+        `item count changed: golden ${golden.items.length} -> now ${doc.items.length}`,
+      );
+      const di = firstDiff(doc.items, golden.items);
+      if (di)
+        assert.deepStrictEqual(
+          doc.items[di.i],
+          golden.items[di.i],
+          `item #${di.i} ("${di.name}") differs from golden`,
         );
       assert.equal(actual, goldenText, "output differs from golden snapshot");
     });

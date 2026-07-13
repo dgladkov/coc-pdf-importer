@@ -12,6 +12,8 @@ interface FoundryFolder {
   id?: string;
   name?: string;
   type?: string;
+  /** Parent folder (a Folder document, or an id in raw create data). */
+  folder?: FoundryFolder | string | null;
 }
 
 interface FoundryActor {
@@ -28,9 +30,18 @@ interface FoundryActor {
   delete(): Promise<unknown>;
 }
 
+interface FoundryItem {
+  id?: string;
+  name?: string;
+  folder?: FoundryFolder | null;
+  system?: any;
+  delete(): Promise<unknown>;
+}
+
 interface FoundryGame {
   i18n: FoundryI18n;
   actors?: { filter(predicate: (actor: FoundryActor) => boolean): FoundryActor[] };
+  items?: { filter(predicate: (item: FoundryItem) => boolean): FoundryItem[] };
   folders?: {
     find(
       predicate: (folder: FoundryFolder) => boolean,
@@ -67,8 +78,13 @@ declare const game: FoundryGame;
 declare const ui: FoundryUi;
 declare const Hooks: { once(hook: string, fn: (...args: any[]) => void): void };
 declare const Actor: { create(data: object): Promise<FoundryActor> };
+declare const Item: { create(data: object): Promise<FoundryItem> };
 declare const Folder: {
-  create(data: { name: string; type: string }): Promise<FoundryFolder>;
+  create(data: {
+    name: string;
+    type: string;
+    folder?: string | null;
+  }): Promise<FoundryFolder>;
 };
 declare const foundry: {
   applications: {

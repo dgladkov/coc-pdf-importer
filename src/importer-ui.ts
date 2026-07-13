@@ -1,11 +1,11 @@
-import { processPDF } from "./process.ts";
-import { importCharacters } from "./importer.ts";
+import { importDocument } from "./document.ts";
 
 type ImportProgress = {
   name: string;
   status: "pending" | "working" | "done" | "error";
   created: number;
   failed: number;
+  items: number;
   error?: string;
 };
 
@@ -92,6 +92,7 @@ export class PdfImporterConfig extends foundry.applications.api.HandlebarsApplic
       status: "pending",
       created: 0,
       failed: 0,
+      items: 0,
     }));
     await this.render({ parts: ["progress", "footer"] });
 
@@ -100,17 +101,15 @@ export class PdfImporterConfig extends foundry.applications.api.HandlebarsApplic
       entry.status = "working";
       await this.render({ parts: ["progress"] });
       try {
-        const characters = await processPDF(
-          new Uint8Array(await files[i].arrayBuffer()),
-        );
         const folderName = files[i].name.replace(/\.[^.]+$/, "");
-        const result = await importCharacters(characters, {
-          folderName,
-          notify: false,
-        });
+        const result = await importDocument(
+          new Uint8Array(await files[i].arrayBuffer()),
+          { folderName, notify: false },
+        );
         entry.status = "done";
-        entry.created = result.created;
-        entry.failed = result.failed;
+        entry.created = result.actors.created;
+        entry.failed = result.actors.failed;
+        entry.items = result.items.created;
       } catch (e) {
         entry.status = "error";
         entry.error = e instanceof Error ? e.message : String(e);
@@ -126,8 +125,8 @@ export class PdfImporterConfig extends foundry.applications.api.HandlebarsApplic
     switch (p.status) {
       case "working":
         return game.i18n.localize("coc-pdf-importer.Progress.Working");
-      case "done":
-        return p.failed
+      case "done": {
+        const base = p.failed
           ? game.i18n.format("coc-pdf-importer.Progress.CreatedWithErrors", {
               created: p.created,
               failed: p.failed,
@@ -135,6 +134,8 @@ export class PdfImporterConfig extends foundry.applications.api.HandlebarsApplic
           : game.i18n.format("coc-pdf-importer.Progress.Created", {
               created: p.created,
             });
+        return p.items ? `${base} (+${p.items} items)` : base;
+      }
       case "error":
         return game.i18n.format("coc-pdf-importer.Errors.ErrorProcessing", {
           error: p.error ?? "",
