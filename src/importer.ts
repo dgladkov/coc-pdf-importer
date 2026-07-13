@@ -892,6 +892,20 @@ function spellItem(name: string, spellIndex: ItemIndex): any {
   return data;
 }
 
+// A genuinely unspecialized skill (skillName "Any", e.g. "Science (Any)",
+// "Language (Any)") still prompts for a specialization on the sheet — the system
+// treats skillName === "Any" as unresolved. Import it as "(None)" instead
+// (matching the CoC7 dholehouse/actor importers) so it lands as a concrete,
+// non-prompting skill.
+function deSpecializeAny(data: any): void {
+  if ((data.system?.skillName ?? "").toLowerCase() !== "any") return;
+  data.name = String(data.name).replace(/\s*\(\s*any\s*\)\s*$/i, " (None)");
+  data.system.skillName = "None";
+  data.system.properties = data.system.properties ?? {};
+  data.system.properties.requiresname = false;
+  data.system.properties.picknameonly = false;
+}
+
 // Build a CoC7 skill item. A name of the form "Spec (Name)" is split into its
 // specialization + skillName; the percentage is stored as the base adjustment.
 // When the skill (or its generic "(Any)" template) exists in the compendium, the
@@ -940,6 +954,7 @@ function skillItem(
       },
     };
   }
+  deSpecializeAny(data);
   setCocid(data, "skill");
   return data;
 }
@@ -1000,6 +1015,7 @@ function languageItem(
   // We've named the specific language, so the sheet must not re-prompt for it.
   data.system.properties.requiresname = false;
   data.system.properties.picknameonly = false;
+  deSpecializeAny(data); // "Language (Any)" -> "Language (None)"
   setCocid(data, "skill");
   return data;
 }

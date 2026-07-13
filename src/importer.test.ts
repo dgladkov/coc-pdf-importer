@@ -879,6 +879,51 @@ describe("importCharacters — compendium lookup", () => {
     assert.equal(s.flags.CoC7.cocidFlag.id, "i.skill.science-biology");
   });
 
+  test("an unspecialized '(Any)' skill imports as '(None)' so the sheet doesn't prompt", async () => {
+    mockCompendium({
+      skills: [
+        {
+          name: "Science (Any)",
+          type: "skill",
+          system: {
+            skillName: "Any",
+            specialization: "Science",
+            base: "1",
+            properties: { special: true, requiresname: true, picknameonly: true },
+          },
+          flags: { CoC7: { cocidFlag: { id: "i.skill.science-any" } } },
+        },
+        {
+          name: "Language (Other)",
+          type: "skill",
+          system: {
+            skillName: "Any",
+            specialization: "Language",
+            base: "1",
+            properties: { special: true, requiresname: true, picknameonly: true },
+          },
+          flags: { CoC7: { cocidFlag: { id: "i.skill.language-other" } } },
+        },
+      ],
+    });
+    await importCharacters(
+      [makeCharacter({ skills: { "Science (any)": 40, "Language (Any)": 30 } })],
+      { notify: false },
+    );
+    // "(Any)" -> "(None)", with skillName "None" and the prompt flags off, so the
+    // sheet treats it as a concrete skill (skillName === "Any" would re-prompt).
+    const sci = item(created[0], "Science (None)");
+    assert.ok(sci, "Science (any) renamed to (None)");
+    assert.equal(sci.system.skillName, "None");
+    assert.equal(sci.system.properties.requiresname, false);
+    assert.equal(sci.system.properties.picknameonly, false);
+    assert.equal(sci.system.base, "40");
+    const lang = item(created[0], "Language (None)");
+    assert.ok(lang, "Language (Any) renamed to (None)");
+    assert.equal(lang.system.skillName, "None");
+    assert.equal(lang.system.base, "30");
+  });
+
   test("a matched weapon keeps compendium metadata but takes the book's damage", async () => {
     mockCompendium({
       skills: [
