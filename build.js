@@ -27,6 +27,10 @@ const baseConfig = {
   platform: 'browser',
   target: ['node18'],
   outfile: 'module.js',
+  // Some transitive shim deps (es-arraybuffer-base64 → es-shims) reference the
+  // bare Node global `global`, which is undefined in the browser. Rewrite it to
+  // `globalThis`. esbuild respects scoping, so shadowed locals are untouched.
+  define: { global: 'globalThis' },
   plugins: [copyPdfWorkerPlugin],
 };
 

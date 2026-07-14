@@ -29,6 +29,9 @@ function buildShim() {
       bundle: true,
       format: "iife",
       platform: "browser",
+      // es-arraybuffer-base64's es-shims deps reference the bare Node `global`,
+      // undefined in a worker — rewrite it to `globalThis` (matches build.js).
+      define: { global: "globalThis" },
       minify: true,
       write: false,
     })
