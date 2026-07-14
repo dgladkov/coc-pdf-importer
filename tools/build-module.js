@@ -9,6 +9,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import * as esbuild from 'esbuild';
 import { copyPdfWorker } from './copy-worker.js';
+import { bundleConfig } from './esbuild-config.js';
 
 const BUILD = 'build';
 const STAGE = path.join(BUILD, 'staging'); // module contents, zipped then removed
@@ -19,15 +20,11 @@ const SEVEN_ZIP = process.platform === 'win32' ? '7z' : '7zz';
 fs.rmSync(BUILD, { recursive: true, force: true });
 fs.mkdirSync(STAGE, { recursive: true });
 
-// Bundle the module into the staging dir (minified, with a source map). Mirrors
-// the production esbuild settings in build.js.
+// Bundle the module into the staging dir (minified, with a source map), using
+// the same options as the production build in build.js.
 await esbuild.build({
-  entryPoints: ['src/index.ts'],
-  bundle: true,
-  platform: 'browser',
-  target: ['node18'],
+  ...bundleConfig,
   minify: true,
-  sourcemap: true,
   outfile: path.join(STAGE, 'module.js'),
 });
 

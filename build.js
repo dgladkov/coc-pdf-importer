@@ -2,6 +2,7 @@ import path from 'node:path';
 import process from 'node:process';
 import * as esbuild from 'esbuild';
 import { copyPdfWorker } from './tools/copy-worker.js';
+import { bundleConfig } from './tools/esbuild-config.js';
 
 const isWatchMode = process.argv.includes('--watch');
 
@@ -22,28 +23,19 @@ const copyPdfWorkerPlugin = {
 };
 
 const baseConfig = {
-  entryPoints: ['src/index.ts'],
-  bundle: true,
-  platform: 'browser',
-  target: ['node18'],
+  ...bundleConfig,
   outfile: 'module.js',
-  // Some transitive shim deps (es-arraybuffer-base64 → es-shims) reference the
-  // bare Node global `global`, which is undefined in the browser. Rewrite it to
-  // `globalThis`. esbuild respects scoping, so shadowed locals are untouched.
-  define: { global: 'globalThis' },
   plugins: [copyPdfWorkerPlugin],
 };
 
 const devConfig = {
   ...baseConfig,
   minify: false,
-  sourcemap: true,
 }
 
 const prodConfig = {
   ...baseConfig,
   minify: true,
-  sourcemap: true,
 }
 
 
