@@ -1,5 +1,7 @@
 import "math.sumprecise/auto"; // shim Math.sumPrecise on the main thread (pdf.js
 // uses it; the worker gets the same shim prepended at build time). Must be first.
+import "es-arraybuffer-base64/auto"; // shim Uint8Array.prototype.toHex etc. (pdf.js
+// uses them; the worker gets the same shim prepended at build time).
 import * as pdfjs from "pdfjs-dist";
 import { PdfImporterConfig } from "./importer-ui.ts";
 

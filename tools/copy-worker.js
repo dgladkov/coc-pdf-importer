@@ -1,9 +1,10 @@
-// pdf.js's worker calls `Math.sumPrecise` (used when laying out text runs). It
-// is a recent addition to the language, so a browser/Foundry client that
-// predates it makes the worker throw and silently mis-extract text — the same
-// truncation we shim away in Node via node-setup.ts. We can't inject a global
-// into the worker at runtime, so we prepend the polyfill to the worker file
-// itself when copying it into a build.
+// pdf.js's worker calls recent language additions — `Math.sumPrecise` (laying
+// out text runs) and `Uint8Array.prototype.toHex` / `Uint8Array.fromBase64`
+// (computing document fingerprints). A browser/Foundry client that predates
+// them makes the worker throw (e.g. `a.toHex is not a function`) — the same
+// gap we shim away in Node via node-setup.ts. We can't inject a global into the
+// worker at runtime, so we prepend the polyfills to the worker file itself when
+// copying it into a build.
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -13,13 +14,15 @@ const WORKER_SRC = "node_modules/pdfjs-dist/build/pdf.worker.min.mjs";
 
 let shimPromise;
 
-// Bundle the same `math.sumprecise/auto` shim the Node tooling uses into a
-// self-contained browser IIFE (cached — it never changes within a run).
+// Bundle the same `math.sumprecise/auto` and `es-arraybuffer-base64/auto` shims
+// the Node tooling uses into a self-contained browser IIFE (cached — it never
+// changes within a run).
 function buildShim() {
   shimPromise ??= esbuild
     .build({
       stdin: {
-        contents: "import 'math.sumprecise/auto';",
+        contents:
+          "import 'math.sumprecise/auto';\nimport 'es-arraybuffer-base64/auto';",
         resolveDir: process.cwd(),
         loader: "js",
       },
@@ -33,8 +36,8 @@ function buildShim() {
   return shimPromise;
 }
 
-// Write pdf.js's worker into `destDir` with the Math.sumPrecise shim prepended
-// so the polyfill is installed before the worker body runs.
+// Write pdf.js's worker into `destDir` with the shims prepended so the
+// polyfills are installed before the worker body runs.
 export async function copyPdfWorker(destDir) {
   const shim = await buildShim();
   const worker = fs.readFileSync(WORKER_SRC, "utf8");
