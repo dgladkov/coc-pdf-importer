@@ -67,7 +67,10 @@ Appendices B–D) yield world items:
 - **Tomes** — bibliographic metadata, Sanity / Mythos stats, study time; Link,
   Relevance, and spell lists go in the keeper notes (no spell item linking).
 - **Artefacts** — full text in keeper notes; Foundry `weapon` when the body
-  looks combat-capable, otherwise generic `item`.
+  looks combat-capable, otherwise generic `item`. Nested under region folders
+  when the appendix prints chapter banners (`Artefacts/Peru/…`).
+- **Tomes** — also nest under region folders when a banner is present
+  (`Tomes/Egypt/…`).
 
 ## Usage
 
