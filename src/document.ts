@@ -8,6 +8,11 @@ import { processPDF } from "./process.ts";
 import { importCharacters } from "./importer.ts";
 import type { ImportResult } from "./importer.ts";
 import type { PulpItem, PulpTalent, PulpArchetype } from "./pulp.ts";
+import type {
+  AppendixSpell,
+  AppendixTome,
+  AppendixArtefact,
+} from "./appendix.ts";
 
 // --- Foundry item documents from parsed items ------------------------------
 
@@ -23,6 +28,13 @@ function escapeHtml(text: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+}
+
+function paragraphs(parts: string[]): string {
+  return parts
+    .filter((p) => p && p.trim())
+    .map((p) => `<p>${escapeHtml(p.trim())}</p>`)
+    .join("");
 }
 
 // Resolve a skill name to its CoCID, mirroring CoC7Utilities.toKebabCase so
@@ -77,11 +89,169 @@ function archetypeDoc(a: PulpArchetype, source: string): any {
   };
 }
 
-// Build the Foundry item document for a parsed pulp item.
+// Hybrid spell: castingTime + legacy costs; body in description; empty costList.
+function spellDoc(s: AppendixSpell, source: string): any {
+  return {
+    name: s.name,
+    type: "spell",
+    system: {
+      description: {
+        value: paragraphs([s.description]),
+        keeper: "",
+        alternativeNames: "",
+      },
+      castingTime: s.castingTime,
+      costs: {
+        hitPoints: s.costs.hitPoints,
+        magicPoints: s.costs.magicPoints,
+        others: s.costs.others,
+        sanity: s.costs.sanity,
+        power: s.costs.power,
+      },
+      costList: [],
+      source,
+      type: {
+        bind: false,
+        call: false,
+        combat: false,
+        contact: false,
+        dismiss: false,
+        enchantment: false,
+        gate: false,
+        summon: false,
+      },
+    },
+  };
+}
+
+function bookDoc(t: AppendixTome, source: string): any {
+  const biblio = [t.language, t.author && `by ${t.author}`, t.date]
+    .filter(Boolean)
+    .join(", ");
+  const valueParts = [
+    [biblio, t.physical].filter(Boolean).join(". ").replace(/\.\./g, "."),
+    t.description,
+  ];
+  const keeperParts = [
+    t.link && `Link: ${t.link}`,
+    t.relevance && `Relevance: ${t.relevance}`,
+    t.spells && `Spells: ${t.spells}`,
+  ].filter(Boolean) as string[];
+  const mythos =
+    t.mythosRating > 0 ||
+    t.cthulhuMythos.initial > 0 ||
+    t.cthulhuMythos.final > 0;
+  return {
+    name: t.name,
+    type: "book",
+    system: {
+      author: t.author,
+      content: "",
+      date: t.date,
+      description: {
+        value: paragraphs(valueParts),
+        keeper: paragraphs(keeperParts),
+      },
+      difficultyLevel: "regular",
+      gains: {
+        cthulhuMythos: {
+          initial: t.cthulhuMythos.initial,
+          final: t.cthulhuMythos.final,
+        },
+        occult: 0,
+        others: [],
+      },
+      language: t.language,
+      mythosRating: t.mythosRating,
+      sanityLoss: t.sanityLoss.toLowerCase(),
+      study: {
+        necessary: t.study.necessary,
+        units: t.study.units,
+      },
+      type: { mythos, occult: false, other: !mythos },
+      itemDocuments: [],
+      itemKeys: [],
+    },
+  };
+}
+
+function artefactDoc(a: AppendixArtefact, _source: string): any {
+  if (a.isWeapon) {
+    return {
+      name: a.name,
+      type: "weapon",
+      system: {
+        description: {
+          value: paragraphs([a.description]),
+          special: "",
+          keeper: paragraphs([a.keeper]),
+        },
+        skill: {
+          main: { name: "", id: "" },
+          alternativ: { name: "", id: "" },
+        },
+        range: {
+          normal: { value: "0", damage: "" },
+          long: { value: "0", damage: "" },
+          extreme: { value: "0", damage: "" },
+        },
+        usesPerRound: { normal: "1", max: "", burst: null },
+        bullets: null,
+        ammo: 0,
+        malfunction: null,
+        blastRadius: null,
+        properties: {
+          rngd: false,
+          mnvr: false,
+          thrown: false,
+          shotgun: false,
+          dbrl: false,
+          impl: false,
+          brst: false,
+          auto: false,
+          ahdb: false,
+          addb: false,
+          slnt: false,
+          spcl: true,
+          mont: false,
+          blst: false,
+          stun: false,
+          rare: false,
+          burn: false,
+        },
+        price: {},
+      },
+    };
+  }
+  return {
+    name: a.name,
+    type: "item",
+    system: {
+      description: {
+        value: paragraphs([a.description]),
+        keeper: paragraphs([a.keeper]),
+      },
+      quantity: 1,
+      weight: 0,
+      price: {},
+    },
+  };
+}
+
+// Build the Foundry item document for a parsed world item.
 export function pulpItemDoc(item: PulpItem, source: string): any {
-  return item.kind === "talent"
-    ? talentDoc(item, source)
-    : archetypeDoc(item, source);
+  switch (item.kind) {
+    case "talent":
+      return talentDoc(item, source);
+    case "archetype":
+      return archetypeDoc(item, source);
+    case "spell":
+      return spellDoc(item, source);
+    case "tome":
+      return bookDoc(item, source);
+    case "artefact":
+      return artefactDoc(item, source);
+  }
 }
 
 // --- world creation --------------------------------------------------------
@@ -90,6 +260,9 @@ export function pulpItemDoc(item: PulpItem, source: string): any {
 const ITEM_TYPE_FOLDERS: Record<string, string> = {
   talent: "Talents",
   archetype: "Archetypes",
+  spell: "Spells",
+  tome: "Tomes",
+  artefact: "Artefacts",
 };
 
 // The icon each item kind gets at creation time (not part of the parsed source
@@ -97,6 +270,8 @@ const ITEM_TYPE_FOLDERS: Record<string, string> = {
 const ITEM_TYPE_ICONS: Record<string, string> = {
   talent: "systems/CoC7/assets/icons/skills.svg",
   archetype: "systems/CoC7/assets/icons/skills.svg",
+  spell: "systems/CoC7/assets/icons/pentagram-rose.svg",
+  tome: "systems/CoC7/assets/icons/secret-book.svg",
 };
 
 export interface CreatePulpItemsOptions {
@@ -113,11 +288,10 @@ export interface CreatePulpItemsResult {
   items: any[];
 }
 
-// Build and create pulp item documents in the world under a "<folderName>" Item
-// folder, one subfolder per item kind ("Talents", "Archetypes", ...). Idempotent
-// per subfolder: a re-import replaces same-named items rather than duplicating.
-// (Actors are created separately, at the top level of their own Actor folder —
-// see importDocument.)
+// Build and create world item documents under a "<folderName>" Item folder, one
+// subfolder per item kind ("Talents", "Spells", ...). Artefacts nest further
+// under a region folder when the appendix printed one (Artefacts/Peru/...).
+// Idempotent per leaf folder: a re-import replaces same-named items.
 export async function createPulpItems(
   items: PulpItem[],
   options: CreatePulpItemsOptions = {},
@@ -125,13 +299,16 @@ export async function createPulpItems(
   const result: CreatePulpItemsResult = { created: 0, items: [] };
   if (items.length === 0) return result;
 
-  const source = options.source ?? "Pulp Cthulhu";
+  const source = options.source ?? options.folderName ?? "PDF Import";
   const parent = await ensureItemFolder(
-    options.folderName ?? "Pulp Cthulhu",
+    options.folderName ?? "PDF Import",
     null,
   );
 
-  // Group by kind so each kind lands in its own subfolder.
+  // Group by kind, then (for artefacts) by region, so each leaf folder is filled
+  // in one pass and re-import replace stays scoped to that folder.
+  type Leaf = { folderPath: string[]; group: PulpItem[] };
+  const leaves: Leaf[] = [];
   const byKind = new Map<string, PulpItem[]>();
   for (const item of items) {
     const list = byKind.get(item.kind) ?? [];
@@ -140,12 +317,50 @@ export async function createPulpItems(
   }
 
   for (const [kind, group] of byKind) {
-    const folder = await ensureItemFolder(
-      ITEM_TYPE_FOLDERS[kind] ?? kind,
-      parent?.id ?? null,
-    );
+    const typeFolder = ITEM_TYPE_FOLDERS[kind] ?? kind;
+    if (kind === "artefact") {
+      const byRegion = new Map<string, PulpItem[]>();
+      for (const item of group) {
+        const region =
+          item.kind === "artefact" && item.region ? item.region : "";
+        const list = byRegion.get(region) ?? [];
+        list.push(item);
+        byRegion.set(region, list);
+      }
+      for (const [region, regionGroup] of byRegion) {
+        leaves.push({
+          folderPath: region ? [typeFolder, region] : [typeFolder],
+          group: regionGroup,
+        });
+      }
+    } else if (kind === "tome") {
+      // Optional region nesting for tomes (same appendix banners).
+      const byRegion = new Map<string, PulpItem[]>();
+      for (const item of group) {
+        const region = item.kind === "tome" && item.region ? item.region : "";
+        const list = byRegion.get(region) ?? [];
+        list.push(item);
+        byRegion.set(region, list);
+      }
+      for (const [region, regionGroup] of byRegion) {
+        leaves.push({
+          folderPath: region ? [typeFolder, region] : [typeFolder],
+          group: regionGroup,
+        });
+      }
+    } else {
+      leaves.push({ folderPath: [typeFolder], group });
+    }
+  }
+
+  for (const leaf of leaves) {
+    let folder = parent;
+    for (const name of leaf.folderPath) {
+      folder = await ensureItemFolder(name, folder?.id ?? null);
+    }
+    const kind = leaf.group[0]?.kind ?? "";
     const img = ITEM_TYPE_ICONS[kind];
-    const docs = group.map((item) => pulpItemDoc(item, source));
+    const docs = leaf.group.map((item) => pulpItemDoc(item, source));
     await removeReplacedItems(folder, docs);
     for (const doc of docs) {
       try {
@@ -165,7 +380,7 @@ export async function createPulpItems(
     }
   }
   if (options.notify !== false) {
-    ui.notifications.info(`Imported ${result.created} pulp items.`);
+    ui.notifications.info(`Imported ${result.created} items.`);
   }
   return result;
 }
