@@ -59,7 +59,7 @@ sibling folders of the same name.)
 ## Usage
 
 1. Install the module from
-   `https://raw.githubusercontent.com/dgladkov/coc-pdf-importer/refs/heads/main/module.json`
+   `https://github.com/Achoobert/coc-pdf-importer/releases/latest/download/module.json`
 2. Go to Settings → Game Settings → Call of Cthulhu PDF Importer → Import button
 3. Upload the document(s) and wait until the import is complete
 4. Navigate to the Actors or Items sidebar. Entries are created in folders named
@@ -168,4 +168,4 @@ Without the worker shim, text extraction silently truncates glyph runs.
 - `module.json` — a copy of the manifest served next to the zip, so a release's
   manifest URL can point at it while the download URL points at `module.zip`.
 
-7-Zip must be installed (`7z` on Windows, `7zz` on Linux/macOS).
+7-Zip must be installed (`7z` or `7zz` on PATH).
