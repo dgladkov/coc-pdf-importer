@@ -126,6 +126,7 @@ describe("pulpItemDoc", () => {
         mythosRating: 18,
         study: { necessary: 10, units: "CoC7.weeks" },
         spells: "Fog Test",
+        region: "",
       },
       "Test Source",
     );
@@ -149,6 +150,7 @@ describe("pulpItemDoc", () => {
         description: "A small charm.",
         keeper: "Link: Desk. Full mechanics here.",
         isWeapon: false,
+        region: "",
       },
       "Test",
     );
@@ -162,6 +164,7 @@ describe("pulpItemDoc", () => {
         description: "",
         keeper: "Deals 1D8 damage.",
         isWeapon: true,
+        region: "Peru",
       },
       "Test",
     );
@@ -331,6 +334,7 @@ describe("createPulpItems", () => {
           mythosRating: 9,
           study: { necessary: 2, units: "CoC7.weeks" },
           spells: "Fog Test",
+          region: "Egypt",
         },
         {
           kind: "artefact",
@@ -339,6 +343,7 @@ describe("createPulpItems", () => {
           description: "A small charm.",
           keeper: "Link: Desk, page 2. A small charm with no combat use.",
           isWeapon: false,
+          region: "Peru",
         },
       ],
       { folderName: "Masks", notify: false },
@@ -346,10 +351,18 @@ describe("createPulpItems", () => {
     assert.ok(byName("Spells"));
     assert.ok(byName("Tomes"));
     assert.ok(byName("Artefacts"));
+    assert.ok(byName("Peru"));
+    assert.ok(byName("Egypt"));
     assert.equal(parentOf(byName("Spells")), byName("Masks").id);
+    assert.equal(parentOf(byName("Peru")), byName("Artefacts").id);
+    assert.equal(parentOf(byName("Egypt")), byName("Tomes").id);
     assert.equal(created.find((i) => i.name === "Fog Test").type, "spell");
     assert.equal(created.find((i) => i.name === "Fog Tome").type, "book");
     assert.equal(created.find((i) => i.name === "Fog Charm").type, "item");
+    assert.equal(
+      created.find((i) => i.name === "Fog Charm").folder,
+      byName("Peru").id,
+    );
     assert.equal(
       created.find((i) => i.name === "Fog Test").img,
       "systems/CoC7/assets/icons/pentagram-rose.svg",

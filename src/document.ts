@@ -289,8 +289,9 @@ export interface CreatePulpItemsResult {
 }
 
 // Build and create world item documents under a "<folderName>" Item folder, one
-// subfolder per item kind ("Talents", "Spells", ...). Idempotent per subfolder:
-// a re-import replaces same-named items rather than duplicating.
+// subfolder per item kind ("Talents", "Spells", ...). Artefacts nest further
+// under a region folder when the appendix printed one (Artefacts/Peru/...).
+// Idempotent per leaf folder: a re-import replaces same-named items.
 export async function createPulpItems(
   items: PulpItem[],
   options: CreatePulpItemsOptions = {},
@@ -304,7 +305,10 @@ export async function createPulpItems(
     null,
   );
 
-  // Group by kind so each kind lands in its own subfolder.
+  // Group by kind, then (for artefacts) by region, so each leaf folder is filled
+  // in one pass and re-import replace stays scoped to that folder.
+  type Leaf = { folderPath: string[]; group: PulpItem[] };
+  const leaves: Leaf[] = [];
   const byKind = new Map<string, PulpItem[]>();
   for (const item of items) {
     const list = byKind.get(item.kind) ?? [];
@@ -313,12 +317,50 @@ export async function createPulpItems(
   }
 
   for (const [kind, group] of byKind) {
-    const folder = await ensureItemFolder(
-      ITEM_TYPE_FOLDERS[kind] ?? kind,
-      parent?.id ?? null,
-    );
+    const typeFolder = ITEM_TYPE_FOLDERS[kind] ?? kind;
+    if (kind === "artefact") {
+      const byRegion = new Map<string, PulpItem[]>();
+      for (const item of group) {
+        const region =
+          item.kind === "artefact" && item.region ? item.region : "";
+        const list = byRegion.get(region) ?? [];
+        list.push(item);
+        byRegion.set(region, list);
+      }
+      for (const [region, regionGroup] of byRegion) {
+        leaves.push({
+          folderPath: region ? [typeFolder, region] : [typeFolder],
+          group: regionGroup,
+        });
+      }
+    } else if (kind === "tome") {
+      // Optional region nesting for tomes (same appendix banners).
+      const byRegion = new Map<string, PulpItem[]>();
+      for (const item of group) {
+        const region = item.kind === "tome" && item.region ? item.region : "";
+        const list = byRegion.get(region) ?? [];
+        list.push(item);
+        byRegion.set(region, list);
+      }
+      for (const [region, regionGroup] of byRegion) {
+        leaves.push({
+          folderPath: region ? [typeFolder, region] : [typeFolder],
+          group: regionGroup,
+        });
+      }
+    } else {
+      leaves.push({ folderPath: [typeFolder], group });
+    }
+  }
+
+  for (const leaf of leaves) {
+    let folder = parent;
+    for (const name of leaf.folderPath) {
+      folder = await ensureItemFolder(name, folder?.id ?? null);
+    }
+    const kind = leaf.group[0]?.kind ?? "";
     const img = ITEM_TYPE_ICONS[kind];
-    const docs = group.map((item) => pulpItemDoc(item, source));
+    const docs = leaf.group.map((item) => pulpItemDoc(item, source));
     await removeReplacedItems(folder, docs);
     for (const doc of docs) {
       try {

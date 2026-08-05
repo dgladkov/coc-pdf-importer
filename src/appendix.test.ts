@@ -47,6 +47,19 @@ describe("parseSpellCosts", () => {
     assert.equal(c.magicPoints, "3");
     assert.equal(c.others, "a rare gem");
   });
+
+  test("accepts per-round and all-remaining cost forms", () => {
+    const per = parseSpellCosts("5 magic points per round; 1D10 Sanity points");
+    assert.equal(per.magicPoints, "5");
+    assert.equal(per.sanity, "1d10");
+    assert.match(per.others, /per round/i);
+    const all = parseSpellCosts(
+      "all remaining magic points; all remaining POW; all remaining Sanity points",
+    );
+    assert.equal(all.magicPoints, "all remaining");
+    assert.equal(all.power, "all remaining");
+    assert.equal(all.sanity, "all remaining");
+  });
 });
 
 describe("parseStudyUnits", () => {
@@ -90,6 +103,61 @@ TOMES
 
   test("returns empty when no appendix B", () => {
     assert.deepEqual(parseAppendixSpells("just some travel text"), []);
+  });
+
+  test("parses Serpent-style NEW SPELLS with ALL-CAPS titles", () => {
+    const spells = parseAppendixSpells(`
+APPENDIX B
+NEW ARTIFACTS, TECHNOLOGY, TOMES AND SPELLS
+TOMES
+Fake Tome
+ • Sanity Loss: 1D4
+ • Cthulhu Mythos: +1/+2 percentiles
+ • Mythos Rating: 9
+ • Study: 1 week
+ • Spells: Contact Yig
+NEW SPELLS
+BECOME THE DARKNESS
+ • Cost: all remaining magic points; all remaining POW; all remaining Sanity points
+ • Casting time: 1 round
+Self-sacrifice to the dark god.
+COILS OF YIG
+ • Cost: 5 magic points per round; 1D10 Sanity points
+ • Casting time: 10 minutes
+Coils crush the target.
+Keeper note: ignore this as a title.
+SKINWALKING
+ • Cost: 10 magic points
+ • Casting time: 1 hour
+Wear another's skin.
+`);
+    assert.equal(spells.length, 3);
+    assert.equal(spells[0].name, "BECOME THE DARKNESS");
+    assert.equal(spells[0].costs.magicPoints, "all remaining");
+    assert.equal(spells[1].name, "COILS OF YIG");
+    assert.equal(spells[1].costs.magicPoints, "5");
+    assert.equal(spells[2].name, "SKINWALKING");
+    assert.ok(!spells.some((s) => /Keeper/i.test(s.name)));
+    assert.ok(!spells.some((s) => /Contact Yig NEW/i.test(s.name)));
+  });
+
+  test("parses Innsmouth M-bullet Cost/Casting time", () => {
+    const spells = parseAppendixSpells(`
+Marine Magic & Artifacts
+Alter Weather
+M Cost: 10+ magic points
+M Casting time: 3+ minutes
+Moderates weather conditions.
+Appear Human (Variant)
+M Cost: 5+ magic points
+M Casting time: 5+ rounds
+Enables a deep one to appear human.
+`);
+    assert.equal(spells.length, 2);
+    assert.equal(spells[0].name, "Alter Weather");
+    assert.equal(spells[0].costs.magicPoints, "10+");
+    assert.equal(spells[0].castingTime, "3+ minutes");
+    assert.equal(spells[1].name, "Appear Human (Variant)");
   });
 });
 
@@ -141,6 +209,60 @@ ARTIFACTS
     assert.equal(tomes[1].name, "Blue Codex");
     assert.equal(tomes[1].spells, "none");
   });
+
+  test("keeps title after Spells: none and Spanish written-by metadata", () => {
+    const text = `
+APPENDIX C
+TOMES
+PERU
+Final Confessions of Gaspar Figueroa
+Spanish, written by Gaspar Figueroa, 1543. Octavo, handwritten on vellum.
+ • Link: Museo, page 65.
+A rambling manuscript.
+Relevance: useful clue.
+ • Sanity Loss: 1D3
+ • Cthulhu Mythos: +1/+2 percentiles
+ • Mythos Rating: 9
+ • Study: 2 weeks
+ • Spells: none
+AMERICA
+The Pnakotic Manuscripts
+English, author and translator unknown, 15th century. Quarto, red leather.
+ • Link: Library, page 134.
+Five bound manuscripts.
+Relevance: deep lore.
+ • Sanity Loss: 1D8
+ • Cthulhu Mythos: +3/+7 percentiles
+ • Mythos Rating: 30
+ • Study: 45 weeks
+ • Spells: Contact Yithian.
+The Black Rites of Luveh-Keraphf
+Egyptian hieroglyphs, by Luveh-Keraphf, c. Thirteenth Dynasty Egypt (1786-1633 BCE). Ten papyrus scrolls.
+ • Link: Bedroom, page 10.
+Forbidden rites.
+Relevance: Egypt chapter.
+ • Sanity Loss: 1D10
+ • Cthulhu Mythos: +2/+4 percentiles
+ • Mythos Rating: 30
+ • Study: 6 weeks
+ • Spells: none
+APPENDIX D
+ARTIFACTS
+`;
+    const tomes = parseAppendixTomes(text);
+    assert.deepEqual(
+      tomes.map((t) => t.name),
+      [
+        "Final Confessions of Gaspar Figueroa",
+        "The Pnakotic Manuscripts",
+        "The Black Rites of Luveh-Keraphf",
+      ],
+    );
+    assert.equal(tomes[0].region, "Peru");
+    assert.equal(tomes[0].language, "Spanish");
+    assert.equal(tomes[1].region, "America");
+    assert.equal(tomes[2].language, "Egyptian");
+  });
 });
 
 describe("artefact helpers", () => {
@@ -173,20 +295,89 @@ PERU
 Golden Test Mirror
  • Link: Hotel Test, page 64, Peru.
 A polished gold mask used as a mirror. Viewing it may provoke visions of later events.
+ENGLAND
 Iron Test Blade
  • Link: Armory, page 10.
 A curved sword. The blade deals 1D8+1 damage and always harms supernatural beings.
 `;
 
-  test("parses link, keeper text, and weapon flag", () => {
+  test("parses link, keeper text, weapon flag, and region", () => {
     const items = parseAppendixArtefacts(sample);
     assert.equal(items.length, 2);
     assert.equal(items[0].name, "Golden Test Mirror");
+    assert.equal(items[0].region, "Peru");
     assert.match(items[0].link, /Hotel Test/);
     assert.match(items[0].keeper, /polished gold/);
     assert.equal(items[0].isWeapon, false);
     assert.equal(items[1].name, "Iron Test Blade");
+    assert.equal(items[1].region, "England");
     assert.equal(items[1].isWeapon, true);
+  });
+
+  test("parses Appearance bullets and ALL-CAPS titles", () => {
+    const items = parseAppendixArtefacts(`
+APPENDIX D
+ARTIFACTS
+COBRA CROWN, THE
+ • Appearance in the campaign: Chapter 7: Calcutta
+The Cobra Crown was once worn by sorcerer-kings and holds great power for the wielder.
+PAIN WHIP
+ • Appearance in the campaign: Chapter 1: Bolivia
+A twelve-foot whip covered in sharp barbs that deals 1D6 damage.
+`);
+    assert.equal(items.length, 2);
+    assert.equal(items[0].name, "COBRA CROWN, THE");
+    assert.match(items[0].link, /Calcutta/);
+    assert.equal(items[1].isWeapon, true);
+  });
+
+  test("parses Innsmouth named artefact headings", () => {
+    const items = parseAppendixArtefacts(`
+DEEP ONE ARTIFACTS
+Idols from R'lyeh
+Such idols represent various statuettes usually depicting Great Cthulhu or Father Dagon and may grant boons when used with Contact spells.
+Jewelry from the Deep
+Golden jewelry recovered from the deep ones grants nightly dream visions of Cthulhu at a cost of Sanity.
+Mapulos & Shoggoth-Twsha
+Paired mapulos allow a twsha to control a shoggoth for as long as concentration holds.
+Trident or Spear of the Deep
+A coral-tipped trident that deals 1D8 damage and may be thrown underwater without penalty.
+`);
+    assert.equal(items.length, 4);
+    assert.equal(items[0].name, "Idols from R'lyeh");
+    assert.equal(items[3].name, "Trident or Spear of the Deep");
+    assert.equal(items[3].isWeapon, true);
+  });
+});
+
+describe("parseAppendixTomes — Serpent-style", () => {
+  test("parses Appearance + Initial/Full Mythos titles", () => {
+    const tomes = parseAppendixTomes(`
+APPENDIX C
+TOMES
+THE INMOST NIGHT
+ • Appearance in the campaign: Chapters 2–9
+Naacal notebooks of strange lore.
+ • Sanity Loss: 1D6
+ • Cthulhu Mythos (Initial Reading): +2%
+ • Cthulhu Mythos (Full Study): +5%
+ • Mythos Rating: 20
+ • Study: 2 weeks
+ • Spells: Contact Tsathoggua, Flesh Ward
+Gospel of Yig
+ • Sanity Loss: 1D6
+ • Cthulhu Mythos (Initial Reading): +2%
+ • Cthulhu Mythos (Full Study): +4%
+ • Mythos Rating: 18
+ • Study: 7 days
+ • Spells: Contact Yig
+`);
+    assert.equal(tomes.length, 2);
+    assert.equal(tomes[0].name, "THE INMOST NIGHT");
+    assert.equal(tomes[0].cthulhuMythos.initial, 2);
+    assert.equal(tomes[0].cthulhuMythos.final, 5);
+    assert.equal(tomes[1].name, "Gospel of Yig");
+    assert.equal(tomes[1].study.units, "CoC7.days");
   });
 });
 

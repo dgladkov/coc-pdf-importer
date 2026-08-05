@@ -1135,4 +1135,50 @@ describe("parseCocCharacters (unit)", () => {
     assert.equal(c.name, "The Sphinx");
     assert.equal(c.description, "ancient guardian");
   });
+
+  // Modern Chaosium two-column sheets flatten as STR…APP…CON… (zigzag), not
+  // classic STR…CON…. Innsmouth and similar books use this layout.
+  test("zigzag STR APP CON characteristic order is recognised", () => {
+    const [c] = parseCocCharacters(
+      "Tough Hybrid, age 30, EOD agent STR 70 APP 30 CON 60 POW 45 SIZ 55 EDU 50 DEX 70 SAN — INT 50 " +
+      "HP 11 DB +1D4 Build 1 Move 9 MP 9 " +
+      "Combat Brawl 65% (32/13) damage 1D3+DB Dodge 35% (17/7) " +
+      "Skills Climb 50%, Swim 60%.",
+    );
+    assert.equal(c.name, "Tough Hybrid");
+    assert.equal(c.age, 30);
+    assert.equal(c.characteristics.STR!.value, 70);
+    assert.equal(c.characteristics.APP!.value, 30);
+    assert.equal(c.characteristics.CON!.value, 60);
+    assert.equal(c.characteristics.SAN!.value, null);
+    assert.equal(c.characteristics.INT!.value, 50);
+    assert.equal(c.derived.DB, "+1D4");
+  });
+
+  test("zigzag layout still keeps classic STR CON blocks", () => {
+    const cs = parseCocCharacters(
+      "Classic Guard, age 40, watchman STR 60 CON 70 SIZ 55 DEX 50 INT 50 APP 45 POW 50 EDU 40 SAN 50 HP 12 " +
+      "DB: 0 Build: 0 Move: 8 MP: 10 Combat Brawl 40% (20/8) damage 1D3 " +
+      "Skills Listen 40%. " +
+      "Zig Agent, age 25, hybrid STR 70 APP 30 CON 60 POW 45 SIZ 55 EDU 50 DEX 70 SAN — INT 50 " +
+      "HP 11 DB 0 Build 0 Move 9 MP 9 Combat Brawl 50% (25/10) damage 1D3 " +
+      "Skills Swim 70%.",
+    );
+    assert.equal(cs.length, 2);
+    assert.equal(cs[0].characteristics.STR!.value, 60);
+    assert.equal(cs[0].characteristics.CON!.value, 70);
+    assert.equal(cs[1].characteristics.APP!.value, 30);
+    assert.equal(cs[1].characteristics.CON!.value, 60);
+  });
+
+  test("zigzag accepts EDU ? as a null characteristic", () => {
+    const [c] = parseCocCharacters(
+      "Funny Sam, age 39, secretive vagrant STR 75 APP 25 CON 85 POW 45 SIZ 85 EDU ? DEX 50 SAN 31 INT 50 " +
+      "HP 17 DB +1D4 Build 1 Move 7 MP 9 Combat Brawl 40% (20/8) damage 1D3 " +
+      "Skills Stealth 50%.",
+    );
+    assert.equal(c.characteristics.EDU!.value, null);
+    assert.equal(c.characteristics.EDU!.raw, "?");
+    assert.equal(c.characteristics.STR!.value, 75);
+  });
 });
