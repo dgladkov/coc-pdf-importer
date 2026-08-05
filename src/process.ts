@@ -1,6 +1,7 @@
 import * as pdfjs from "pdfjs-dist";
 import { parsePulpItems } from "./pulp.ts";
 import type { PulpItem } from "./pulp.ts";
+import { parseAppendixItems } from "./appendix.ts";
 
 // A processed document: the actor stat blocks plus any pulp reference items
 // (talents, archetypes) as internal structures (not yet Foundry documents). A
@@ -2431,8 +2432,9 @@ function parseActors(pageItems: RawItem[][]): CocCharacter[] {
 // parsers touch Foundry — turning items into world documents is the importer's job.
 export async function processPDF(data: Uint8Array): Promise<ProcessedDocument> {
   const pageItems = await extractPages(data);
+  const text = pagesToText(pageItems);
   return {
     actors: parseActors(pageItems),
-    items: parsePulpItems(pagesToText(pageItems)),
+    items: [...parsePulpItems(text), ...parseAppendixItems(text)],
   };
 }
