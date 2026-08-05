@@ -91,37 +91,101 @@ function escapeForHtmlLater(s: string): string {
 
 // --- section slices --------------------------------------------------------
 
-// Prefer APPENDIX letter markers; fall back to section title words.
+// TOC and cross-refs also say "APPENDIX B". Prefer candidates in the last
+// quarter of the book (where Masks-style appendices live) and score by a
+// content probe (Cost: / Sanity Loss: / Link:).
 function sliceAppendix(
   text: string,
   letter: string,
   title: RegExp,
   nextLetter: string | null,
   nextTitle: RegExp | null,
+  contentProbe: RegExp,
 ): string {
-  const upper = text; // already mixed; match case-insensitive
-  const startRe = new RegExp(`APPENDIX\\s+${letter}\\b`, "i");
-  let start = -1;
-  const m = startRe.exec(upper);
-  if (m) start = m.index + m[0].length;
-  else {
-    const t = title.exec(upper);
-    if (t) start = t.index + t[0].length;
+  const minStart = Math.floor(text.length * 0.7);
+  const starts: number[] = [];
+  const startRe = new RegExp(`APPENDIX\\s+${letter}\\b`, "gi");
+  let m: RegExpExecArray | null;
+  while ((m = startRe.exec(text))) {
+    const s = m.index + m[0].length;
+    if (s >= minStart) starts.push(s);
   }
-  if (start < 0) return "";
+  const titleRe = new RegExp(
+    title.source,
+    title.flags.includes("g") ? title.flags : title.flags + "g",
+  );
+  while ((m = titleRe.exec(text))) {
+    const s = m.index + m[0].length;
+    if (s >= minStart) starts.push(s);
+  }
+  // Fall back to whole-book starts if the late-book window found nothing.
+  if (starts.length === 0) {
+    startRe.lastIndex = 0;
+    while ((m = startRe.exec(text))) starts.push(m.index + m[0].length);
+    titleRe.lastIndex = 0;
+    while ((m = titleRe.exec(text))) starts.push(m.index + m[0].length);
+  }
 
-  let end = upper.length;
-  if (nextLetter) {
-    const n = new RegExp(`APPENDIX\\s+${nextLetter}\\b`, "i").exec(
-      upper.slice(start),
-    );
-    if (n) end = start + n.index;
+  let best = "";
+  let bestScore = 0;
+  for (const start of starts) {
+    let end = text.length;
+    if (nextLetter) {
+      const n = new RegExp(`APPENDIX\\s+${nextLetter}\\b`, "gi");
+      n.lastIndex = start;
+      let nm: RegExpExecArray | null;
+      let bestNext = -1;
+      let bestNextScore = -1;
+      while ((nm = n.exec(text))) {
+        if (nm.index < start) continue;
+        if (nm.index < minStart && start >= minStart) continue;
+        const nextSlice = text.slice(nm.index, Math.min(text.length, nm.index + 12000));
+        const nextProbe =
+          nextLetter === "C"
+            ? /•\s*Sanity Loss:/gi
+            : nextLetter === "D"
+              ? /•\s*Link:/gi
+              : contentProbe;
+        const sc = (nextSlice.match(nextProbe) || []).length;
+        if (sc > bestNextScore) {
+          bestNextScore = sc;
+          bestNext = nm.index;
+        }
+        if (sc >= 3 && nm.index >= minStart) break;
+      }
+      if (bestNext >= 0) end = bestNext;
+    }
+    if (nextTitle) {
+      const n = new RegExp(
+        nextTitle.source,
+        nextTitle.flags.includes("g") ? nextTitle.flags : nextTitle.flags + "g",
+      );
+      n.lastIndex = start;
+      let nm: RegExpExecArray | null;
+      while ((nm = n.exec(text))) {
+        if (nm.index < start) continue;
+        if (nm.index >= minStart || start < minStart) {
+          // Only tighten end if this title sits before our current end and
+          // the gap still has our content (avoid cutting at early TOC words).
+          const gap = text.slice(start, nm.index);
+          const gapScore = (gap.match(new RegExp(contentProbe.source, "gi")) || [])
+            .length;
+          if (gapScore >= 2 && nm.index < end) end = nm.index;
+          break;
+        }
+      }
+    }
+    const slice = text.slice(start, end);
+    const score = (slice.match(new RegExp(contentProbe.source, "gi")) || [])
+      .length;
+    // Prefer denser late slices: slight bias for later starts.
+    const biased = score + (start >= minStart ? score * 0.1 : 0);
+    if (biased > bestScore) {
+      bestScore = biased;
+      best = slice;
+    }
   }
-  if (nextTitle && end === upper.length) {
-    const n = nextTitle.exec(upper.slice(start));
-    if (n) end = start + n.index;
-  }
-  return upper.slice(start, end);
+  return bestScore >= 2 ? best : "";
 }
 
 // --- costs -----------------------------------------------------------------
@@ -216,7 +280,7 @@ function parseCastingTime(rest: string): { castingTime: string; length: number }
 
 export function parseAppendixSpells(text: string): AppendixSpell[] {
   const section = stripFurniture(
-    sliceAppendix(text, "B", /\bSPELLS\b/, "C", /\bTOMES\b/),
+    sliceAppendix(text, "B", /\bSPELLS\b/, "C", /\bTOMES\b/, /•\s*Cost:/),
   );
   if (!section) return [];
 
@@ -318,7 +382,14 @@ function parseTomeMetadata(meta: string): {
 
 export function parseAppendixTomes(text: string): AppendixTome[] {
   const section = stripFurniture(
-    sliceAppendix(text, "C", /\bTOMES\b/, "D", /\bART[EI]FACTS\b/),
+    sliceAppendix(
+      text,
+      "C",
+      /\bTOMES\b/,
+      "D",
+      /\bART[EI]FACTS\b/,
+      /•\s*Sanity Loss:/,
+    ),
   );
   if (!section) return [];
 
@@ -543,6 +614,7 @@ export function parseAppendixArtefacts(text: string): AppendixArtefact[] {
       /\bART[EI]FACTS\b/,
       "E",
       /\bAPPENDIX\s+E\b/,
+      /•\s*Link:/,
     ),
   );
   if (!section) return [];
