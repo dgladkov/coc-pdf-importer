@@ -185,7 +185,7 @@ function sliceAppendix(
       best = slice;
     }
   }
-  return bestScore >= 2 ? best : "";
+  return bestScore >= 1 ? best : "";
 }
 
 // --- costs -----------------------------------------------------------------
@@ -246,7 +246,7 @@ function normalizeDice(s: string): string {
 // --- spells ----------------------------------------------------------------
 
 const TITLE_AT_END =
-  /((?:[A-Z][A-Za-z'/.-]+(?:\s+(?:of|the|a|an|to|and|from|for|with|in|[A-Z][A-Za-z'/.-]+))+|[A-Z][A-Za-z'/.-]+)(?:\s*\([^)]+\))?)\s*$/;
+  /((?:[A-Z][A-Za-z\u2019'/.-]+(?:\s+(?:of|the|a|an|to|and|from|for|with|in|[A-Z][A-Za-z\u2019'/.-]+))+|[A-Z][A-Za-z\u2019'/.-]+)(?:\s*\([^)]+\))?)\s*$/;
 
 function extractSpellTitle(before: string): string {
   // Drop trailing body sentence fragments (end with ".") then match title.
@@ -346,6 +346,12 @@ export function parseAppendixSpells(text: string): AppendixSpell[] {
 
 // --- tomes -----------------------------------------------------------------
 
+const TOME_LANG =
+  "English|Latin|Arabic|French|Greek|German|Spanish|Chinese|Japanese|Italian|Portuguese|Hebrew|Egyptian|Dutch|Russian|Swedish|Turkish|Hindi|Welsh|Gaelic|Akkadian|Coptic";
+
+const TOME_REGION =
+  /\b(?:PERU|AMERICA|ENGLAND|EGYPT|KENYA|AUSTRALIA|CHINA|INDIA)\b/gi;
+
 export function parseStudyUnits(unit: string): string {
   const u = unit.toLowerCase().replace(/s$/, "");
   const map: Record<string, string> = {
@@ -363,11 +369,16 @@ function parseTomeMetadata(meta: string): {
   date: string;
   physical: string;
 } {
-  // "English, by Nigel Blackwell, 1920. Sextodecimo, ..."
-  // "Latin, translated by Olaus Wormius, 1228. Spanish black letter..."
-  // "Arabic, by Abdul al-Hazrad (Abd al-Azrad), c. 730.Ten scrolls,..."
+  // "English, by Nigel Blackwell, 1920. ..."
+  // "Latin, translated by Olaus Wormius, 1228. ..."
+  // "Spanish, written by Gaspar Figueroa, 1543. ..."
+  // "English, James Woodville, 17th century. ..."
+  // "Arabic, by Abdul al-Hazrad (Abd al-Azrad), c. 730. ..."
   const m = meta.match(
-    /^([^,]+),\s*(?:(?:translated\s+)?by\s+)?(.+?),\s*((?:c\.\s*)?\d{3,4})\.(.*)$/i,
+    new RegExp(
+      String.raw`^(${TOME_LANG})(?:\s+\w+)?,\s*(?:(?:(?:translated|written)\s+)?by\s+|author[^,]*,\s*)?(.+?),\s*((?:c\.\s*)?\d{3,4}|[^.]{0,40}?century)\.(.*)$`,
+      "i",
+    ),
   );
   if (m) {
     return {
@@ -377,7 +388,107 @@ function parseTomeMetadata(meta: string): {
       physical: cleanSpaces(m[4]),
     };
   }
-  return { language: "", author: "", date: "", physical: cleanSpaces(meta) };
+  const langOnly = meta.match(new RegExp(String.raw`^(${TOME_LANG})\b`, "i"));
+  return {
+    language: langOnly ? langOnly[1] : "",
+    author: "",
+    date: "",
+    physical: cleanSpaces(meta),
+  };
+}
+
+/** Clean a raw title run sitting before a language metadata line. */
+function cleanTomeTitle(raw: string): string {
+  let s = cleanSpaces(raw);
+  s = s.replace(/^.*\bnone\s+/i, "");
+  s = s.replace(/^.*\)\s+/, "");
+  // Prefer text after the last sentence end when spells prose bleeds in.
+  const period = s.lastIndexOf(". ");
+  if (period >= 0 && period > s.length - 80) s = s.slice(period + 2);
+  s = s.replace(TOME_REGION, " ");
+  s = s.replace(/\s+Classical$/i, "");
+  s = cleanSpaces(s);
+  // If "The Necronomicon"-style title is buried after a spell name, prefer
+  // the last "The …" / "A …" run.
+  const the = s.match(/\b((?:The|A|An)\s+[A-Z][A-Za-z'/’.-]+(?:\s+[A-Z][A-Za-z'/’.-]+)*)\s*$/);
+  if (the && the[1].split(/\s+/).length >= 2) return cleanSpaces(the[1]);
+  const tm = s.match(TITLE_AT_END);
+  if (tm) return cleanSpaces(tm[1]);
+  // Drop leading comma-list remnant ("Bolt, Beta Ward Title")
+  const afterComma = s.match(/,\s*([^,]+)$/);
+  if (afterComma) {
+    const cand = cleanSpaces(afterComma[1]);
+    const tm2 = cand.match(TITLE_AT_END);
+    if (tm2) return cleanSpaces(tm2[1]);
+  }
+  return s.slice(-60);
+}
+
+function splitTomePreamble(before: string): {
+  name: string;
+  language: string;
+  author: string;
+  date: string;
+  physical: string;
+  link: string;
+  description: string;
+  relevance: string;
+} {
+  const text = cleanSpaces(before);
+  const langRe = new RegExp(
+    String.raw`\b(${TOME_LANG})(?:\s+\w+)?,\s*(?:(?:(?:translated|written)\s+)?by\s+|author[^,]*,\s*)?`,
+    "gi",
+  );
+  let last: RegExpExecArray | null = null;
+  let m: RegExpExecArray | null;
+  while ((m = langRe.exec(text))) last = m;
+  if (!last) {
+    return {
+      name: "",
+      language: "",
+      author: "",
+      date: "",
+      physical: "",
+      link: "",
+      description: text,
+      relevance: "",
+    };
+  }
+
+  const name = cleanTomeTitle(text.slice(0, last.index));
+  let rest = text.slice(last.index);
+  // Meta runs until Link / Relevance / end — take through first "sentence" of
+  // bibliographic line (first period that ends the date clause) plus physical.
+  const metaEnd = rest.search(/\s+•\s*Link:|\s+Relevance\s*:/i);
+  const meta = metaEnd >= 0 ? rest.slice(0, metaEnd) : rest;
+  rest = metaEnd >= 0 ? rest.slice(metaEnd) : "";
+
+  const { language, author, date, physical } = parseTomeMetadata(meta);
+
+  let link = "";
+  const linkM = rest.match(/•\s*Link:\s*(.+?(?:page\s+\d+[^.]*\.?))/i);
+  if (linkM) {
+    link = cleanSpaces(linkM[1]);
+    rest = cleanSpaces(rest.slice(linkM.index! + linkM[0].length));
+  }
+
+  let relevance = "";
+  const relM = rest.match(/Relevance\s*:\s*([\s\S]+)$/i);
+  if (relM) {
+    relevance = cleanSpaces(relM[1]);
+    rest = cleanSpaces(rest.slice(0, relM.index));
+  }
+
+  return {
+    name,
+    language,
+    author,
+    date,
+    physical,
+    link,
+    description: rest,
+    relevance,
+  };
 }
 
 export function parseAppendixTomes(text: string): AppendixTome[] {
@@ -425,27 +536,25 @@ export function parseAppendixTomes(text: string): AppendixTome[] {
   for (let i = 0; i < anchors.length; i++) {
     const a = anchors[i];
     const entryStart =
-      i === 0
-        ? 0
-        : findNextTomeTitleIndex(
-            section,
-            anchors[i - 1].spellsStart,
-            a.index,
-          );
+      i === 0 ? 0 : findNextTomeTitleIndex(section, anchors[i - 1].spellsStart, a.index);
     const before = section.slice(entryStart, a.index);
-
     const spellsEnd =
       i + 1 < anchors.length
-        ? findNextTomeTitleIndex(
-            section,
-            a.spellsStart,
-            anchors[i + 1].index,
-          )
+        ? findNextTomeTitleIndex(section, a.spellsStart, anchors[i + 1].index)
         : section.length;
     const spells = cleanSpaces(section.slice(a.spellsStart, spellsEnd));
-
     const parsed = splitTomePreamble(before);
-    if (!parsed.name) continue;
+    if (!parsed.name || parsed.name.length < 2) continue;
+    // Drop titles that are clearly prose fragments.
+    if (/\.$/.test(parsed.name) || parsed.name.split(/\s+/).length > 10) continue;
+    if (
+      /\b(?:devoted|translated|commentaries|likely|written|chapters|members)\b/i.test(
+        parsed.name,
+      )
+    ) {
+      continue;
+    }
+    if (/^\d/.test(parsed.name)) continue;
 
     tomes.push({
       name: parsed.name,
@@ -466,9 +575,6 @@ export function parseAppendixTomes(text: string): AppendixTome[] {
   return tomes;
 }
 
-const TOME_LANG =
-  "English|Latin|Arabic|French|Greek|German|Spanish|Chinese|Japanese|Italian|Portuguese|Hebrew|Egyptian|Dutch|Russian|Swedish|Turkish|Hindi|Welsh|Gaelic|Akkadian|Coptic";
-
 // Index where the next tome title begins (end of previous spells list).
 function findNextTomeTitleIndex(
   section: string,
@@ -476,9 +582,8 @@ function findNextTomeTitleIndex(
   statsIndex: number,
 ): number {
   const chunk = section.slice(from, statsIndex);
-  // Require "by" / "translated by" so spell names are not mistaken for languages.
   const meta = new RegExp(
-    String.raw`(?:${TOME_LANG}),\s*(?:(?:translated\s+)?by\s+)`,
+    String.raw`(?:${TOME_LANG})(?:\s+\w+)?,\s*(?:(?:(?:translated|written)\s+)?by\s+|author[^,]*,\s*)?`,
     "i",
   );
   const m = meta.exec(chunk);
@@ -495,84 +600,12 @@ function findNextTomeTitleIndex(
     else if (cut === parenAt) probe = before.slice(parenAt + 1);
     else probe = before.slice(periodAt + 1);
   }
-  const tm = probe.match(TITLE_AT_END);
-  if (tm) {
-    const name = tm[1];
+  const name = cleanTomeTitle(probe);
+  if (name) {
     const local = before.lastIndexOf(name);
     if (local >= 0) return from + local;
   }
   return from + m.index;
-}
-
-function splitTomePreamble(before: string): {
-  name: string;
-  language: string;
-  author: string;
-  date: string;
-  physical: string;
-  link: string;
-  description: string;
-  relevance: string;
-} {
-  let text = cleanSpaces(before);
-  // Strip leading leftover from previous spells list (often ends mid-list).
-  // Title: first Title-Case run that is followed by a language-like metadata line.
-  const metaRe = new RegExp(
-    String.raw`((?:[A-Z][A-Za-z'/’.-]+(?:\s+(?:of|the|a|an|to|and|from|for|with|in|As|A|d['’][A-Z][A-Za-z'/’.-]+|[A-Z][A-Za-z'/’.-]+))+|[A-Z][A-Za-z'/’.-]+))\s+((?:${TOME_LANG}),\s*(?:(?:translated\s+)?by\s+)?.+?\.\s*.*?)(?=\s+•\s*Link:|\s+Relevance:|$)`,
-    "i",
-  );
-  const m = text.match(metaRe);
-  let name = "";
-  let meta = "";
-  let rest = text;
-  if (m && m.index !== undefined) {
-    name = cleanSpaces(m[1]);
-    meta = cleanSpaces(m[2]);
-    rest = cleanSpaces(text.slice(m.index + m[0].length));
-  } else {
-    // Fallback: last Title-ish words before Link/Relevance.
-    const fb = text.match(
-      /((?:[A-Z][A-Za-z'/’.-]+(?:\s+[A-Za-z'/’.-]+){0,8}))\s+(•\s*Link:|Relevance:)/,
-    );
-    if (fb && fb.index !== undefined) {
-      name = cleanSpaces(fb[1]);
-      rest = cleanSpaces(text.slice(fb.index + name.length));
-    }
-  }
-
-  let link = "";
-  const linkM = rest.match(/•\s*Link:\s*(.+?)(?=\s+Relevance:|\s+[A-Z][a-z]|$)/);
-  // Link often followed by prose starting with capital — take until sentence
-  // that doesn't look like "Page N" location.
-  const linkM2 = rest.match(
-    /•\s*Link:\s*(.+?(?:page\s+\d+[^.]*\.?))/i,
-  );
-  if (linkM2) {
-    link = cleanSpaces(linkM2[1]);
-    rest = cleanSpaces(rest.slice(linkM2.index! + linkM2[0].length));
-  } else if (linkM) {
-    link = cleanSpaces(linkM[1]);
-    rest = cleanSpaces(rest.slice(linkM.index! + linkM[0].length));
-  }
-
-  let relevance = "";
-  const relM = rest.match(/Relevance:\s*([\s\S]+)$/i);
-  if (relM) {
-    relevance = cleanSpaces(relM[1]);
-    rest = cleanSpaces(rest.slice(0, relM.index));
-  }
-
-  const { language, author, date, physical } = parseTomeMetadata(meta);
-  return {
-    name,
-    language,
-    author,
-    date,
-    physical,
-    link,
-    description: rest,
-    relevance,
-  };
 }
 
 // --- artefacts -------------------------------------------------------------
@@ -618,6 +651,15 @@ export function parseAppendixArtefacts(text: string): AppendixArtefact[] {
     ),
   );
   if (!section) return [];
+  // Prefer starting at the last late-book ARTIFACTS banner inside the slice.
+  const artBanners = [...section.matchAll(/\bART[EI]FACTS\b/gi)];
+  if (artBanners.length > 0) {
+    const last = artBanners[artBanners.length - 1];
+    const after = section.slice(last.index! + last[0].length);
+    if ((after.match(/•\s*Link:/g) || []).length >= 3) {
+      section = after;
+    }
+  }
   // Chapter geography banners are not artefact titles.
   section = section.replace(
     /\b(?:PERU|AMERICA|ENGLAND|EGYPT|KENYA|AUSTRALIA|CHINA|INDIA|HONG\s+KONG|SHANGHAI|NEW\s+YORK|LONDON)\b/gi,
@@ -633,8 +675,7 @@ export function parseAppendixArtefacts(text: string): AppendixArtefact[] {
   let em: RegExpExecArray | null;
   while ((em = entryRe.exec(section))) {
     const name = cleanSpaces(em[1]);
-    if (REGION_HEADERS.test(name)) continue;
-    if (name.split(/\s+/).length > 10) continue;
+    if (!isPlausibleArtefactName(name)) continue;
     starts.push({
       name,
       index: em.index,
@@ -664,7 +705,7 @@ export function parseAppendixArtefacts(text: string): AppendixArtefact[] {
     body = body.replace(/\bTABLE:[\s\S]*$/i, "").trim();
     body = body.replace(/\bPULP:[\s\S]*$/i, "").trim();
     const { description, keeper } = splitArtefactBlurb(body);
-    if (!keeper) continue;
+    if (!keeper || keeper.length < 20) continue;
     artefacts.push({
       name: s.name,
       link,
@@ -674,6 +715,31 @@ export function parseAppendixArtefacts(text: string): AppendixArtefact[] {
     });
   }
   return artefacts;
+}
+
+function isPlausibleArtefactName(name: string): boolean {
+  if (!name || name.length < 3) return false;
+  if (REGION_HEADERS.test(name)) return false;
+  if (name.split(/\s+/).length > 8) return false;
+  if (/\.$/.test(name)) return false;
+  // Chapter / handout banners are often ALL CAPS.
+  if (name === name.toUpperCase() && name.length > 3) return false;
+  // Reject leading prose glue ("Meeting Robert Mackenzie").
+  if (/^(?:Meeting|The|A|An)\s+[A-Z][a-z]+\s+[A-Z][a-z]+$/.test(name) &&
+      !/^(?:The|A|An)\s+(?:Golden|Ward|Mask|Mirror|Crown|Girdle|Necklace|Amulet|Circlet|Token|Ring|Fly)/i.test(name)) {
+    // Allow "The Golden Mirror" etc.; reject "Meeting Robert Mackenzie".
+    if (/^Meeting\b/i.test(name)) return false;
+  }
+  if (/^Meeting\b/i.test(name)) return false;
+  if (/\b(?:Road|Street|Club|Navy|Expedition)\b/i.test(name) && !/\b(?:Mirror|Ward|Mask|Crown|Ring|Scepter)/i.test(name)) {
+    return false;
+  }
+  if (/^(?:Imperial|Carlyle|Seamen|Lantern|Cat-Demon|Elder Sign|New|MR\.|Prospero|Smith)\b/i.test(name)) {
+    return false;
+  }
+  // Trailing section headers like bare "Mirrors".
+  if (/^(?:Mirrors|Artifacts|Artefacts)$/i.test(name)) return false;
+  return true;
 }
 
 // --- public entry ----------------------------------------------------------
