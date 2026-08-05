@@ -19,9 +19,10 @@ Tested on the following documents:
 - Pulp Cthulhu
 
 A single import reads a document once and creates both **actors** and, when the
-document contains them, **items** (currently the Pulp Cthulhu talents and
-archetypes). Everything is placed in folders named after the source file; a
-re-import refreshes same-named entries instead of duplicating them.
+document contains them, **items** (Pulp Cthulhu talents/archetypes, and Chaosium
+appendix Spells / Tomes / Artefacts). Everything is placed in folders named
+after the source file; a re-import refreshes same-named entries instead of
+duplicating them.
 
 ### Actors
 
@@ -52,9 +53,21 @@ their core characteristic(s), bonus points, suggested occupations/traits, talent
 count, and a resolved skill list (each skill mapped to its CoCID itemKey).
 
 Items are filed in a `<file name>` **Item** folder with one subfolder per type
-(`Talents`, `Archetypes`); actors live at the top level of a same-named **Actor**
-folder. (Foundry keeps Actor and Item folders in separate trees, so these are two
-sibling folders of the same name.)
+(`Talents`, `Archetypes`, `Spells`, `Tomes`, `Artefacts`); actors live at the
+top level of a same-named **Actor** folder. (Foundry keeps Actor and Item
+folders in separate trees, so these are two sibling folders of the same name.)
+
+### Spells, Tomes & Artefacts
+
+Books that include Chaosium appendix sections (e.g. Masks of Nyarlathotep
+Appendices B–D) yield world items:
+
+- **Spells** — name, casting time, legacy cost fields (MP / SAN / POW / HP), and
+  description body. Automated `costList` steps are not generated.
+- **Tomes** — bibliographic metadata, Sanity / Mythos stats, study time; Link,
+  Relevance, and spell lists go in the keeper notes (no spell item linking).
+- **Artefacts** — full text in keeper notes; Foundry `weapon` when the body
+  looks combat-capable, otherwise generic `item`.
 
 ## Usage
 
@@ -63,7 +76,8 @@ sibling folders of the same name.)
 2. Go to Settings → Game Settings → Call of Cthulhu PDF Importer → Import button
 3. Upload the document(s) and wait until the import is complete
 4. Navigate to the Actors or Items sidebar. Entries are created in folders named
-   after the source file (items under `Talents` / `Archetypes` subfolders).
+   after the source file (items under typed subfolders such as `Talents` /
+   `Spells` / `Tomes` / `Artefacts`).
 
 ## Development
 
@@ -84,17 +98,17 @@ the Foundry API, which is what makes them directly testable.
 
 1. **Extraction & parsing** — `processPDF()` (in `process.ts`) uses `pdfjs-dist`
    to read every page's text runs **once**, keeping each run's font size. From
-   that shared representation it runs two independent parsers and returns
+   that shared representation it runs independent parsers and returns
    `{ actors, items }`:
    - the **actor parser** strips repeating page furniture, finds stat-block
      anchors (the `STR … CON` run), recovers each block's name/age/description
      (using font size to separate a heading from body prose), and parses the
      stats into `CocCharacter`s. Multi-column group tables expand to one
      character per column.
-   - the **item parser** (`pulp.ts`) reads the book's reference tables/sections
-     into internal `PulpItem` structures (talents, archetypes). These keep
-     source-faithful data — e.g. skill *names*, not resolved CoCIDs — and a
-     document without those sections yields no items.
+   - the **item parsers** (`pulp.ts`, `appendix.ts`) read pulp talent/archetype
+     tables and Chaosium appendix Spells/Tomes/Artefacts into internal
+     `PulpItem` structures. Source-faithful data stays unresolved (e.g. skill
+     *names*, not CoCIDs); a document without those sections yields no items.
 2. **Import** — `importDocument()` (in `document.ts`) creates the world
    documents:
    - actors via `importCharacters()` (`importer.ts`), which maps each
@@ -102,18 +116,22 @@ the Foundry API, which is what makes them directly testable.
      weapons + backing skills, spells), at the top level of a `<file name>`
      Actor folder.
    - items via `createPulpItems()` (`document.ts`), which builds the Foundry
-     `talent`/`archetype` documents — resolving skill names to CoCID itemKeys
-     here, at the Foundry boundary — and files them under typed subfolders of a
-     `<file name>` Item folder.
+     documents (resolving pulp skill names to CoCID itemKeys here) and files
+     them under typed subfolders of a `<file name>` Item folder.
 
    A re-import replaces same-named entries in each folder instead of duplicating.
 
 ### npm scripts
 
-- `npm run dev` — esbuild in watch mode → rebuilds `module.js` on change (use
-  inside a live Foundry data dir)
-- `npm run build` — one-off production bundle to `module.js` (+ source map, +
-  pdf.js worker)
+Copy `fvtt.config.example.js` → `fvtt.config.js` and set `userDataPath` to your
+Foundry user data folder (e.g. `/Users/YOU/foundrydata`). Builds then land in
+`Data/modules/coc-pdf-importer/` under that path.
+
+- `npm run dev` — esbuild in watch mode → rebuilds the module into Foundry’s
+  `Data/modules/coc-pdf-importer/` (or repo root if `userDataPath` is unset)
+- `npm run build` — one-off production bundle to the same destination
+  (`module.js` + source map + pdf.js worker + `module.json` / `lang` /
+  `templates`)
 - `npm run build:module` — **release** build → `build/module.zip` +
   `build/module.json` (requires 7-Zip)
 - `npm run type-check` — `tsc --noEmit` over `src/`, `test/`, `tools/`
