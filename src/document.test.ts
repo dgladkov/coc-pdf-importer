@@ -81,6 +81,96 @@ describe("pulpItemDoc", () => {
     assert.equal(item.system.coreCharacteristicsFormula.value, "(1D6+13)*5");
     assert.deepEqual(item.system.itemDocuments, []);
   });
+
+  test("builds a hybrid spell with legacy costs and empty costList", () => {
+    const item = pulpItemDoc(
+      {
+        kind: "spell",
+        name: "Fog Test",
+        castingTime: "1 round",
+        costs: {
+          magicPoints: "4",
+          sanity: "1d2",
+          power: "",
+          hitPoints: "",
+          others: "",
+        },
+        note: "",
+        description: "Makes fog & <mist>.",
+      },
+      "Test Source",
+    );
+    assert.equal(item.type, "spell");
+    assert.equal(item.system.castingTime, "1 round");
+    assert.equal(item.system.costs.magicPoints, "4");
+    assert.equal(item.system.costs.sanity, "1d2");
+    assert.deepEqual(item.system.costList, []);
+    assert.match(item.system.description.value, /Makes fog &amp; &lt;mist&gt;\./);
+    assert.equal(item.system.source, "Test Source");
+  });
+
+  test("builds a book with keeper relevance/spells and empty itemKeys", () => {
+    const item = pulpItemDoc(
+      {
+        kind: "tome",
+        name: "Red Book",
+        language: "English",
+        author: "Ada",
+        date: "1920",
+        physical: "Quarto.",
+        link: "Library, page 1.",
+        description: "A curious volume.",
+        relevance: "finale clue.",
+        sanityLoss: "1D6",
+        cthulhuMythos: { initial: 2, final: 5 },
+        mythosRating: 18,
+        study: { necessary: 10, units: "CoC7.weeks" },
+        spells: "Fog Test",
+        region: "",
+      },
+      "Test Source",
+    );
+    assert.equal(item.type, "book");
+    assert.equal(item.system.language, "English");
+    assert.equal(item.system.sanityLoss, "1d6");
+    assert.equal(item.system.mythosRating, 18);
+    assert.deepEqual(item.system.gains.cthulhuMythos, { initial: 2, final: 5 });
+    assert.equal(item.system.type.mythos, true);
+    assert.deepEqual(item.system.itemKeys, []);
+    assert.match(item.system.description.keeper, /Relevance: finale clue/);
+    assert.match(item.system.description.keeper, /Spells: Fog Test/);
+  });
+
+  test("builds artefact as item or weapon; keeper holds full text", () => {
+    const mundane = pulpItemDoc(
+      {
+        kind: "artefact",
+        name: "Charm",
+        link: "Desk.",
+        description: "A small charm.",
+        keeper: "Link: Desk. Full mechanics here.",
+        isWeapon: false,
+        region: "",
+      },
+      "Test",
+    );
+    assert.equal(mundane.type, "item");
+    assert.match(mundane.system.description.keeper, /Full mechanics/);
+    const weapon = pulpItemDoc(
+      {
+        kind: "artefact",
+        name: "Blade",
+        link: "Armory.",
+        description: "",
+        keeper: "Deals 1D8 damage.",
+        isWeapon: true,
+        region: "Peru",
+      },
+      "Test",
+    );
+    assert.equal(weapon.type, "weapon");
+    assert.equal(weapon.system.properties.spcl, true);
+  });
 });
 
 describe("createPulpItems", () => {
@@ -209,6 +299,73 @@ describe("createPulpItems", () => {
   test("notifies by default and reports the created count", async () => {
     await createPulpItems([talent("Alpha")], { folderName: "Book" });
     assert.equal(notes.length, 1);
-    assert.match(notes[0], /1 pulp items/);
+    assert.match(notes[0], /1 items/);
+  });
+
+  test("files spells, tomes, and artefacts into typed subfolders", async () => {
+    await createPulpItems(
+      [
+        {
+          kind: "spell",
+          name: "Fog Test",
+          castingTime: "1 round",
+          costs: {
+            magicPoints: "1",
+            sanity: "1",
+            power: "",
+            hitPoints: "",
+            others: "",
+          },
+          note: "",
+          description: "Makes fog.",
+        },
+        {
+          kind: "tome",
+          name: "Fog Tome",
+          language: "English",
+          author: "A Author",
+          date: "1900",
+          physical: "Pamphlet.",
+          link: "Shelf, page 1.",
+          description: "Thin booklet.",
+          relevance: "none.",
+          sanityLoss: "1D4",
+          cthulhuMythos: { initial: 1, final: 2 },
+          mythosRating: 9,
+          study: { necessary: 2, units: "CoC7.weeks" },
+          spells: "Fog Test",
+          region: "Egypt",
+        },
+        {
+          kind: "artefact",
+          name: "Fog Charm",
+          link: "Desk, page 2.",
+          description: "A small charm.",
+          keeper: "Link: Desk, page 2. A small charm with no combat use.",
+          isWeapon: false,
+          region: "Peru",
+        },
+      ],
+      { folderName: "Masks", notify: false },
+    );
+    assert.ok(byName("Spells"));
+    assert.ok(byName("Tomes"));
+    assert.ok(byName("Artefacts"));
+    assert.ok(byName("Peru"));
+    assert.ok(byName("Egypt"));
+    assert.equal(parentOf(byName("Spells")), byName("Masks").id);
+    assert.equal(parentOf(byName("Peru")), byName("Artefacts").id);
+    assert.equal(parentOf(byName("Egypt")), byName("Tomes").id);
+    assert.equal(created.find((i) => i.name === "Fog Test").type, "spell");
+    assert.equal(created.find((i) => i.name === "Fog Tome").type, "book");
+    assert.equal(created.find((i) => i.name === "Fog Charm").type, "item");
+    assert.equal(
+      created.find((i) => i.name === "Fog Charm").folder,
+      byName("Peru").id,
+    );
+    assert.equal(
+      created.find((i) => i.name === "Fog Test").img,
+      "systems/CoC7/assets/icons/pentagram-rose.svg",
+    );
   });
 });

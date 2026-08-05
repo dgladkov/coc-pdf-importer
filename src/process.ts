@@ -1,6 +1,7 @@
 import * as pdfjs from "pdfjs-dist";
 import { parsePulpItems } from "./pulp.ts";
 import type { PulpItem } from "./pulp.ts";
+import { parseAppendixItems } from "./appendix.ts";
 
 // A processed document: the actor stat blocks plus any pulp reference items
 // (talents, archetypes) as internal structures (not yet Foundry documents). A
@@ -142,13 +143,19 @@ export function parseCocCharacters(
     ? mostCommonHeight(chunks.filter((c) => c.height > bodyHeight))
     : 0;
 
-  // A characteristics run always starts "STR <value>+ CON". Values are numbers
-  // (optionally marked with *), or a lone "-" (an em/en dash for N/A stats),
+  // A characteristics run always starts "STR <value> … CON". Values are numbers
+  // (optionally marked with *), a lone "-" (em/en dash for N/A), "?", or "n/a",
   // each optionally followed by a "(3D6 x 5)"-style roll formula and/or an
   // "Average Rolls" multiplier printed after the formula ("45 (1D6+6) ×5").
-  const value = String.raw`(?:\d{1,3}\*?|-|[Nn]/[Aa])(?:\s*\([^)]*\))?(?:\s*[×xX]\s*\d+)?`;
+  //
+  // Classic Chaosium order is STR … CON directly. Modern two-column sheets
+  // (Innsmouth et al.) flatten as STR val APP val CON val POW … — so other
+  // characteristic labels may sit between STR's value(s) and CON.
+  const value = String.raw`(?:\d{1,3}\*?|-|\?|[Nn]/[Aa])(?:\s*\([^)]*\))?(?:\s*[×xX]\s*\d+)?`;
+  const midLabel = String.raw`(?:APP|POW|SIZ|EDU|DEX|SAN|INT|HP|DB|Build|Move|MP|Luck)`;
+  const afterStr = String.raw`(?:${value}|${midLabel}\s+${value})`;
   const anchorRe = new RegExp(
-    String.raw`\bSTR\s+${value}(?:\s+${value})*\s+CON\b`,
+    String.raw`\bSTR\s+${value}(?:\s+${afterStr})*\s+CON\b`,
     "g",
   );
   const anchors = Array.from(text.matchAll(anchorRe), (m) => m.index ?? 0);
@@ -1095,6 +1102,7 @@ function isValueToken(token: string): boolean {
     /^[+-]?\d{1,3}\*?$/.test(token) || // 40, -2, 32*
     /^[+-]?\d*[dD]\d+(?:[+-]\d+)?$/.test(token) || // +1D4, 1D10+5
     token === "-" || // em/en dash (N/A)
+    token === "?" || // unknown / unpublished (Innsmouth EDU ?)
     /^none$/i.test(token)
   );
 }
@@ -2283,6 +2291,40 @@ function normalizeLabels(text: string): string {
     .replace(/\bHit\s+Points?(?=\s*:)/gi, "HP");
 }
 
+// Tokens that appear in every stat block (often at a non-body font size). When
+// they repeat across pages they look like furniture — but stripping them kills
+// zigzag / compact layouts (Innsmouth). Keep them in the concatenated text.
+const STAT_BLOCK_LABELS = new Set(
+  [
+    ...CHAR_LABELS,
+    ...DERIVED_LABELS,
+    ...SECTION_LABELS,
+    "damage",
+    "Damage",
+    "DAMAGE",
+    "Fighting",
+    "Dodge",
+    "Brawl",
+    "Attacks",
+    "Average",
+    "Hit",
+    "Points",
+    "Bonus",
+  ].map((l) => l.toUpperCase()),
+);
+
+function isStatBlockToken(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  if (STAT_BLOCK_LABELS.has(t.toUpperCase())) return true;
+  // Characteristic / derived values, percents, dice, N/A glyphs.
+  if (/^[\d.,]+%?$/.test(t)) return true;
+  if (/^[+-]?\d*[dD]\d+(?:[+-]\d+)?$/.test(t)) return true;
+  if (t === "-" || t === "?" || t === "%" || /^n\/a$/i.test(t)) return true;
+  if (/^\(\d+\/\d+\)$/.test(t)) return true;
+  return false;
+}
+
 function clean(value: unknown): string {
   return String(value ?? "")
     .replace(/\s+/g, " ")
@@ -2390,16 +2432,23 @@ function parseActors(pageItems: RawItem[][]): CocCharacter[] {
   // Identify page furniture (running headers/footers, side titles): non-body
   // runs whose exact text repeats across many pages. Genuine headings — even
   // group titles — appear once, so they are kept.
+  //
+  // Innsmouth (and similar) print characteristic labels/values at a slightly
+  // non-body height; they repeat once per NPC and must NOT be stripped or the
+  // whole book loses every STR…CON anchor.
   const bodyHeight = mostCommonHeight(runs);
   const repeats = new Map<string, number>();
   for (const run of runs) {
     if (run.height !== bodyHeight)
       repeats.set(run.text, (repeats.get(run.text) ?? 0) + 1);
   }
-  const isFurniture = (run: { text: string; height: number }) =>
-    run.height !== bodyHeight &&
-    ((repeats.get(run.text) ?? 0) >= 8 || /^[\d ]+$/.test(run.text)); // repeats or page numbers
-
+  const isFurniture = (run: { text: string; height: number }) => {
+    if (run.height === bodyHeight) return false;
+    if (isStatBlockToken(run.text)) return false;
+    return (
+      (repeats.get(run.text) ?? 0) >= 8 || /^[\d ]+$/.test(run.text)
+    ); // repeats or page numbers
+  };
   // Build the concatenated text and the parallel chunk list with offsets.
   const chunks: TextChunk[] = [];
   const parts: string[] = [];
@@ -2431,8 +2480,9 @@ function parseActors(pageItems: RawItem[][]): CocCharacter[] {
 // parsers touch Foundry — turning items into world documents is the importer's job.
 export async function processPDF(data: Uint8Array): Promise<ProcessedDocument> {
   const pageItems = await extractPages(data);
+  const text = pagesToText(pageItems);
   return {
     actors: parseActors(pageItems),
-    items: parsePulpItems(pagesToText(pageItems)),
+    items: [...parsePulpItems(text), ...parseAppendixItems(text)],
   };
 }

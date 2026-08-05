@@ -308,13 +308,17 @@ export function parsePulpArchetypes(rawText: string): PulpArchetype[] {
   return archetypes;
 }
 
-// A parsed pulp item, tagged by kind so the importer can build the matching
-// Foundry document. Both variants hold source-faithful data — e.g. archetype
-// `skills` are the printed names, not resolved CoCIDs; that resolution and all
-// Foundry-schema shaping happen at import (see document.ts).
+import type { AppendixItem } from "./appendix.ts";
+
+// A parsed world item, tagged by kind so the importer can build the matching
+// Foundry document. Named PulpItem for history (started as pulp talents); now
+// also includes Chaosium appendix spells/tomes/artefacts. Variants hold
+// source-faithful data — e.g. archetype `skills` are printed names, not CoCIDs;
+// resolution and Foundry-schema shaping happen at import (see document.ts).
 export type PulpItem =
   | ({ kind: "talent" } & PulpTalent)
-  | ({ kind: "archetype" } & PulpArchetype);
+  | ({ kind: "archetype" } & PulpArchetype)
+  | AppendixItem;
 
 // Parse every pulp reference item a rulebook's text yields (talents, archetypes).
 // Each parser is guarded by its own specific section header/structure, so a

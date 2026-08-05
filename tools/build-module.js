@@ -6,15 +6,25 @@
 //                         release manifest URL can point at it
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import * as esbuild from 'esbuild';
 import { copyPdfWorker } from './copy-worker.js';
 import { bundleConfig } from './esbuild-config.js';
 
 const BUILD = 'build';
 const STAGE = path.join(BUILD, 'staging'); // module contents, zipped then removed
-// The 7-Zip console binary: "7z" on Windows, "7zz" on Linux/macOS.
-const SEVEN_ZIP = process.platform === 'win32' ? '7z' : '7zz';
+
+/** Prefer 7zz (macOS/Homebrew p7zip), fall back to 7z (Windows / Ubuntu p7zip-full). */
+function resolveSevenZip() {
+  const candidates = process.platform === 'win32' ? ['7z'] : ['7zz', '7z'];
+  for (const bin of candidates) {
+    const result = spawnSync(bin, [], { encoding: 'utf8' });
+    if (result.error?.code !== 'ENOENT') return bin;
+  }
+  return candidates[0];
+}
+
+const SEVEN_ZIP = resolveSevenZip();
 
 // Re-create the build directory from scratch each run.
 fs.rmSync(BUILD, { recursive: true, force: true });
@@ -49,8 +59,8 @@ try {
 } catch (err) {
   if (err.code === 'ENOENT')
     throw new Error(
-      `7-Zip not found — install it and ensure "${SEVEN_ZIP}" is on PATH ` +
-        `(Windows: 7-Zip provides "7z"; Linux/macOS: p7zip provides "7zz").`,
+      `7-Zip not found — install it and ensure "7z" or "7zz" is on PATH ` +
+        `(Windows: 7-Zip provides "7z"; Linux/macOS: p7zip provides "7zz" or "7z").`,
     );
   throw err;
 }
