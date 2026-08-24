@@ -2,13 +2,16 @@ import * as pdfjs from "pdfjs-dist";
 import { parsePulpItems } from "./pulp.ts";
 import type { PulpItem } from "./pulp.ts";
 import { parseAppendixItems } from "./appendix.ts";
+import { parseOldWestItems } from "./oldwest.ts";
+import type { OldWestItem } from "./oldwest.ts";
 
 // A processed document: the actor stat blocks plus any pulp reference items
-// (talents, archetypes) as internal structures (not yet Foundry documents). A
-// non-pulp PDF yields items: [].
+// (talents, archetypes, spells/tomes/artefacts, Old West occupations/skills/
+// weapons) as internal structures (not yet Foundry documents). A document with
+// none of these yields items: [].
 export interface ProcessedDocument {
   actors: CocCharacter[];
-  items: PulpItem[];
+  items: (PulpItem | OldWestItem)[];
 }
 
 export type CharacteristicName =
@@ -285,7 +288,34 @@ function isSpuriousActor(c: CocCharacter): boolean {
 function cleanActorName(name: string): string {
   // Bestiary entries carry a "(page NNN)" cross-reference in their heading
   // ("SHANTAK (page 306)", the unclosed "BYAKHEE (page 283"); drop it.
-  return name.replace(/\s*\(\s*page\s+\d+\s*\)?/i, "").trim();
+  let cleaned = name.replace(/\s*\(\s*page\s+\d+\s*\)?/i, "").trim();
+  // A footnote marker tacked onto a heading ("CATTLE *") carries no meaning
+  // once detached from its footnote text.
+  cleaned = cleaned.replace(/[*†‡]+/g, "");
+  cleaned = stripUnpairedQuote(cleaned);
+  cleaned = clean(cleaned);
+  // Some books print every stat-block name in ALL CAPS ("BILLY THE KID");
+  // proper-case those so they read naturally. A name already in mixed case
+  // (most books) is left untouched so an intentional internal capital (e.g.
+  // "McDonald") is never mangled.
+  return isAllCapsName(cleaned) ? titleCaseTitle(cleaned) : cleaned;
+}
+
+// A quote mark left dangling by name-extraction truncating before its partner
+// (`"VIOLET SCANLON,” age 17` loses its close quote at the comma boundary) is
+// worse than no quote at all; drop the odd one out. A genuinely paired
+// nickname quote ("SWEDE" NIELSEN) is unaffected, since both its marks survive.
+function stripUnpairedQuote(name: string): string {
+  if ((name.match(/"/g) ?? []).length % 2 === 0) return name;
+  const idx = name.lastIndexOf('"');
+  return name.slice(0, idx) + name.slice(idx + 1);
+}
+
+// True when a name's letters are all uppercase (and it has at least one
+// letter) — the convention some books use for stat-block headings.
+function isAllCapsName(name: string): boolean {
+  const letters = name.replace(/[^A-Za-z]/g, "");
+  return letters.length > 0 && letters === letters.toUpperCase();
 }
 
 // ---------------------------------------------------------------------------
@@ -1327,29 +1357,35 @@ const TITLE_CONNECTORS = new Set([
 ]);
 
 // Title-case a single title word, keeping connectors lowercase and capitalising
-// each part of a hyphenated compound ("life-sucke" -> "Life-Sucke").
+// each part of a hyphenated compound ("life-sucke" -> "Life-Sucke"). An
+// apostrophe is NOT a word boundary — a possessive ("Scanlon's") or a Mythos
+// name ("Y'hath") keeps its letter after the apostrophe lowercase.
 function titleCaseWord(word: string): string {
   const lower = word.toLowerCase();
   if (TITLE_CONNECTORS.has(lower)) return lower;
-  return lower.replace(
-    /(^|[-'’])([a-z])/g,
-    (_, sep, c) => sep + c.toUpperCase(),
-  );
+  return lower.replace(/(^|-)([a-z])/g, (_, sep, c) => sep + c.toUpperCase());
 }
 
-// Title-case a whole group title: connectors stay lowercase, hyphenated
-// compounds keep each part capitalised, and parenthetical spacing is tightened
-// ("( NYC)" -> "(Nyc)"). Punctuation around a word (parens, commas) is preserved.
+// Title-case a whole group title: connectors stay lowercase (except at the
+// very start or end, e.g. "La Llorona", which are always capitalised),
+// hyphenated compounds keep each part capitalised, and parenthetical spacing
+// is tightened ("( NYC)" -> "(Nyc)"). Punctuation around a word (parens,
+// commas) is preserved.
 function titleCaseTitle(title: string): string {
-  return title
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((tok) => {
+  const tokens = title.split(/\s+/).filter(Boolean);
+  return tokens
+    .map((tok, i) => {
       const lead = tok.match(/^[^A-Za-z]*/)?.[0] ?? "";
       const trail = tok.match(/[^A-Za-z]*$/)?.[0] ?? "";
       const word = tok.slice(lead.length, tok.length - trail.length);
       if (!word) return tok; // an all-punctuation token such as "("
-      return lead + titleCaseWord(word) + trail;
+      const cased = titleCaseWord(word);
+      const atEdge = i === 0 || i === tokens.length - 1;
+      return (
+        lead +
+        (atEdge ? cased.charAt(0).toUpperCase() + cased.slice(1) : cased) +
+        trail
+      );
     })
     .join(" ")
     .replace(/\(\s+/g, "(")
@@ -2483,6 +2519,10 @@ export async function processPDF(data: Uint8Array): Promise<ProcessedDocument> {
   const text = pagesToText(pageItems);
   return {
     actors: parseActors(pageItems),
-    items: [...parsePulpItems(text), ...parseAppendixItems(text)],
+    items: [
+      ...parsePulpItems(text),
+      ...parseAppendixItems(text),
+      ...parseOldWestItems(text),
+    ],
   };
 }

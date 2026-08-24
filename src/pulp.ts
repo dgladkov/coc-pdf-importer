@@ -29,23 +29,35 @@ const CATEGORY_BY_HEADER: Record<string, TalentCategory> = {
   MISCELLANEOUS: "miscellaneous",
 };
 
-// The four player-talent tables each read:
+// The Pulp Cthulhu core book's four player-talent tables each read:
 //   "TABLE n: <CATEGORY> TALENTS (CHOOSE OR ROLL 1D10) Roll <Category> Talent"
-// followed by ten rows "<roll> <Name> : <description>". The header is matched in
+// followed by ten rows "<roll> <Name> : <description>". Some other books using
+// this same table shape (e.g. Down Darker Trails) print a flat, un-rolled list
+// instead — "TABLE n: <CATEGORY> TALENTS <Category> Talent" with no "(CHOOSE OR
+// ROLL 1D10)"/"Roll" and no leading roll number on each row — so both the
+// prefix and the row's roll number are optional below. The header is matched in
 // full uppercase so the mixed-case "1. Table 3: Physical Talents" cross-reference
 // list elsewhere on the page is ignored. (Table 5 prints "( CHOOSE" with a stray
 // space, hence the \s* after the paren.)
 const TABLE_HEADER =
-  /TABLE\s+\d+:\s*(PHYSICAL|MENTAL|COMBAT|MISCELLANEOUS)\s+TALENTS\s*\(\s*CHOOSE OR ROLL 1D10\s*\)\s*Roll\s+\w+\s+Talent\s+/gi;
+  /TABLE\s+\d+:\s*(PHYSICAL|MENTAL|COMBAT|MISCELLANEOUS)\s+TALENTS\s*(?:\(\s*CHOOSE OR ROLL 1D10\s*\)\s*Roll\s+)?\w+\s+Talent\s+/gi;
 
-// A talent name is a run of capitalized words; the description that follows runs
-// until the next "<roll> <Name>:" row or a page artifact (the next TABLE header,
-// a running header like "25 CREATING PULP HEROES", or a letter-spaced page footer
+// A table with no roll numbers has nothing to naturally stop the row scan at
+// its last entry (see the loop below), so its body is capped to a window sized
+// for a real table's rows, rather than running to the next TABLE header (which,
+// with no rolls at all, could be pages away) — matching the same-shaped problem
+// (and cap) for the last Pulp archetype's bullet list, below.
+const TABLE_BODY_CAP = 1600;
+
+// A talent name is a run of capitalized words (optionally carrying a curly
+// apostrophe, e.g. "Hunter’s Blood"); the description that follows runs until
+// the next row (rolled or not) or a page artifact (the next TABLE header, a
+// running header like "25 CREATING PULP HEROES", or a letter-spaced page footer
 // "s h o o t i n g d e e p o n e s"). The name/description separator is ":" with
 // optional surrounding space ("Alert:" and "Keen Vision : " both occur).
-const NAME = String.raw`[A-Z][A-Za-z][A-Za-z '/-]*?`;
+const NAME = String.raw`[A-Z][A-Za-z][A-Za-z '’/-]*?`;
 const ENTRY = new RegExp(
-  String.raw`(\d{1,2})\s+(${NAME})\s*:\s*(.+?)(?=\s+\d{1,2}\s+${NAME}\s*:|\s+TABLE\s+\d|\s+\d+\s+[A-Z]{2,}\s+[A-Z]{2,}|\s+(?:[A-Za-z]\s){4,}|$)`,
+  String.raw`(?:(\d{1,2})\s+)?(${NAME})\s*:\s*(.+?)(?=\s+(?:\d{1,2}\s+)?${NAME}\s*:|\s+TABLE\s+\d|\s+\d+\s+[A-Z]{2,}\s+[A-Z]{2,}|\s+(?:[A-Za-z]\s){4,}|$)`,
   "g",
 );
 
@@ -96,18 +108,24 @@ export function parsePulpTalents(text: string): PulpTalent[] {
   for (let h = 0; h < headers.length; h++) {
     const category = CATEGORY_BY_HEADER[headers[h][1].toUpperCase()];
     const start = headers[h].index! + headers[h][0].length;
-    const end = h + 1 < headers.length ? headers[h + 1].index! : text.length;
+    const end =
+      h + 1 < headers.length
+        ? headers[h + 1].index!
+        : Math.min(start + TABLE_BODY_CAP, text.length);
     const body = text.slice(start, end);
 
     ENTRY.lastIndex = 0;
     let m: RegExpExecArray | null;
     let lastRoll = 0;
     while ((m = ENTRY.exec(body))) {
-      const roll = Number(m[1]);
-      // Rows are numbered 1..10, strictly increasing; a non-increasing or
-      // out-of-range roll means we have run past the table into other prose.
-      if (roll <= lastRoll || roll > 10) break;
-      lastRoll = roll;
+      const rollText = m[1];
+      if (rollText !== undefined) {
+        const roll = Number(rollText);
+        // Rows are numbered 1..10, strictly increasing; a non-increasing or
+        // out-of-range roll means we have run past the table into other prose.
+        if (roll <= lastRoll || roll > 10) break;
+        lastRoll = roll;
+      }
       talents.push({
         name: m[2].trim(),
         category,

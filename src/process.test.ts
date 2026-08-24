@@ -449,6 +449,19 @@ describe("parseCocCharacters (unit)", () => {
     assert.equal(cs[2].characteristics.INT!.value, 55);
   });
 
+  test("a possessive in a group title keeps its 's' lowercase", () => {
+    const cs = parseCocCharacters(
+      "SCANLON'S VAQUEROS 1 2 " +
+        "STR 60 50 CON 55 65 SIZ 60 55 DEX 60 70 INT 65 45 " +
+        "APP 50 55 POW 70 45 EDU 30 40 SAN 40 45 HP 12 12 " +
+        "DB: 0 Build: 0 Move: 8",
+    );
+    assert.deepEqual(
+      cs.map((c) => c.name),
+      ["Scanlon's Vaqueros 1", "Scanlon's Vaqueros 2"],
+    );
+  });
+
   // A dedicated "Languages:" section merges into the skills as "Language (X)".
   test("a Languages section merges into skills as Language (X)", () => {
     const [c] = parseCocCharacters(
@@ -500,14 +513,38 @@ describe("parseCocCharacters (unit)", () => {
     assert.ok(c.spells.includes("FLESH WARD"));
   });
 
-  test("an ALL-CAPS name with an age is recovered", () => {
+  test("an ALL-CAPS name with an age is recovered and proper-cased", () => {
     const [c] = parseCocCharacters(
       "JOHN SMITH, 45, harbour master STR 60 CON 60 SIZ 60 DEX 60 INT 60 APP 60 POW 60 EDU 60 SAN 60 HP 12 " +
         "DB: 0 Build: 0 Move: 8",
     );
-    assert.equal(c.name, "JOHN SMITH");
+    assert.equal(c.name, "John Smith");
     assert.equal(c.age, 45);
     assert.equal(c.description, "harbour master");
+  });
+
+  test("an ALL-CAPS name keeps its apostrophe's next letter lowercase", () => {
+    const [c] = parseCocCharacters(
+      "Y'HATH, 300, a horror STR 125 CON 385 SIZ 105 DEX 150 INT 125 APP 10 " +
+        "POW 300 EDU 10 SAN 10 HP 49 DB: +2D6 Build: 3 Move: 8",
+    );
+    assert.equal(c.name, "Y'hath");
+  });
+
+  test("a paired nickname quote survives ALL-CAPS proper-casing", () => {
+    const [c] = parseCocCharacters(
+      '"SWEDE" NIELSEN, 40, a henchman STR 85 CON 80 SIZ 80 DEX 60 INT 70 APP 45 ' +
+        "POW 55 EDU 55 SAN 50 HP 16 DB: +1D6 Build: 2 Move: 8",
+    );
+    assert.equal(c.name, '"Swede" Nielsen');
+  });
+
+  test("an unpaired quote left by name truncation is dropped", () => {
+    const [c] = parseCocCharacters(
+      '"VIOLET SCANLON, age 17, a monster STR 100 CON 130 SIZ 55 DEX 100 INT 55 ' +
+        "APP 15 POW 60 EDU 10 SAN 10 HP 18 DB: +1D4 Build: 1 Move: 11",
+    );
+    assert.equal(c.name, "Violet Scanlon");
   });
 
   test("lowercase particles and a title abbreviation stay in the name", () => {

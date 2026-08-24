@@ -171,6 +171,140 @@ describe("pulpItemDoc", () => {
     assert.equal(weapon.type, "weapon");
     assert.equal(weapon.system.properties.spcl, true);
   });
+
+  test("builds an occupation item, expanding sparse skill points over every characteristic", () => {
+    const item = pulpItemDoc(
+      {
+        kind: "occupation",
+        name: "Test Occupation",
+        description: "Flavor text.",
+        occupationSkillPoints: {
+          edu: { multiplier: 2, selected: true, optional: false },
+          dex: { multiplier: 2, selected: true, optional: true },
+        },
+        creditRating: { min: 9, max: 60 },
+        skills: ["Climb", "Art/Craft (any)"],
+        groups: [{ options: 1, skills: ["Charm", "Persuade"] }],
+        personal: 2,
+        personalText: "other skills as personal specialties",
+        special: "",
+      },
+      "Test Source",
+    );
+    assert.equal(item.type, "occupation");
+    assert.equal(item.system.source, "Test Source");
+    assert.equal(item.system.type.pulp, true);
+    assert.deepEqual(item.system.occupationSkillPoints.edu, {
+      multiplier: 2,
+      selected: true,
+      optional: false,
+    });
+    assert.deepEqual(item.system.occupationSkillPoints.str, {
+      multiplier: null,
+      selected: false,
+      optional: false,
+    });
+    assert.deepEqual(item.system.creditRating, { min: 9, max: 60 });
+    assert.deepEqual(item.system.itemKeys, [
+      "i.skill.climb",
+      "i.skill.art-craft-any",
+    ]);
+    assert.deepEqual(item.system.groups, [
+      { options: 1, itemDocuments: [], itemKeys: ["i.skill.charm", "i.skill.persuade"] },
+    ]);
+    assert.equal(item.system.personal, 2);
+    assert.equal(item.system.personalText, "other skills as personal specialties");
+  });
+
+  test("an occupation's Special clause is folded into its description as a second paragraph", () => {
+    const item = pulpItemDoc(
+      {
+        kind: "occupation",
+        name: "Test Occupation",
+        description: "Flavor text.",
+        occupationSkillPoints: {},
+        creditRating: { min: 0, max: 0 },
+        skills: [],
+        groups: [],
+        personal: 0,
+        personalText: "",
+        special: "limited Sanity loss immunity",
+      },
+      "Test Source",
+    );
+    assert.match(item.system.description.value, /Flavor text\.<\/p>/);
+    assert.match(item.system.description.value, /Special: limited Sanity loss immunity/);
+  });
+
+  test("builds a skill item from an altered/new skill write-up", () => {
+    const item = pulpItemDoc(
+      {
+        kind: "oldWestSkill",
+        name: "Test Skill",
+        base: "10%",
+        description: "Does a thing.",
+      },
+      "Test Source",
+    );
+    assert.equal(item.type, "skill");
+    assert.equal(item.system.skillName, "Test Skill");
+    assert.equal(item.system.base, "10");
+    assert.match(item.system.description.value, /Does a thing\./);
+  });
+
+  test("builds a weapon item, splitting a literal '+DB' into the addb flag", () => {
+    const item = pulpItemDoc(
+      {
+        kind: "oldWestWeapon",
+        name: "Test Knife",
+        skill: "Fighting (Brawl)",
+        damage: "1D4+DB",
+        baseRange: "Touch",
+        usesPerRound: "1",
+        bullets: null,
+        malfunction: null,
+        cost: "$2",
+        availability: "C",
+        impale: true,
+        thrown: false,
+        ranged: false,
+        auto: false,
+      },
+      "Test Source",
+    );
+    assert.equal(item.type, "weapon");
+    assert.equal(item.system.skill.main.name, "Fighting (Brawl)");
+    assert.equal(item.system.range.normal.damage, "1D4");
+    assert.equal(item.system.range.normal.value, "0"); // Touch
+    assert.equal(item.system.properties.addb, true);
+    assert.equal(item.system.properties.impl, true);
+    assert.deepEqual(item.system.price, { downDarkerTrails: "$2" });
+  });
+
+  test("splits a compound firearm row's damage across normal/long/extreme range", () => {
+    const item = pulpItemDoc(
+      {
+        kind: "oldWestWeapon",
+        name: "Test Shotgun",
+        skill: "Firearms (Rifle/Shotgun)",
+        damage: "4D6/2D6/1D6",
+        baseRange: "10",
+        usesPerRound: "1 or 2",
+        bullets: 2,
+        malfunction: 99,
+        cost: "$25",
+        availability: "U",
+        impale: false,
+        thrown: false,
+        ranged: true,
+        auto: false,
+      },
+      "Test Source",
+    );
+    assert.equal(item.system.range.normal.damage, "4D6");
+    assert.equal(item.system.range.long.damage, "2D6");
+    assert.equal(item.system.range.extreme.damage, "1D6");
+  });
 });
 
 describe("createPulpItems", () => {
