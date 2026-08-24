@@ -2,13 +2,16 @@ import * as pdfjs from "pdfjs-dist";
 import { parsePulpItems } from "./pulp.ts";
 import type { PulpItem } from "./pulp.ts";
 import { parseAppendixItems } from "./appendix.ts";
+import { parseOldWestItems } from "./oldwest.ts";
+import type { OldWestItem } from "./oldwest.ts";
 
 // A processed document: the actor stat blocks plus any pulp reference items
-// (talents, archetypes) as internal structures (not yet Foundry documents). A
-// non-pulp PDF yields items: [].
+// (talents, archetypes, spells/tomes/artefacts, Old West occupations/skills/
+// weapons) as internal structures (not yet Foundry documents). A document with
+// none of these yields items: [].
 export interface ProcessedDocument {
   actors: CocCharacter[];
-  items: PulpItem[];
+  items: (PulpItem | OldWestItem)[];
 }
 
 export type CharacteristicName =
@@ -2483,6 +2486,10 @@ export async function processPDF(data: Uint8Array): Promise<ProcessedDocument> {
   const text = pagesToText(pageItems);
   return {
     actors: parseActors(pageItems),
-    items: [...parsePulpItems(text), ...parseAppendixItems(text)],
+    items: [
+      ...parsePulpItems(text),
+      ...parseAppendixItems(text),
+      ...parseOldWestItems(text),
+    ],
   };
 }

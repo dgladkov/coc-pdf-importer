@@ -104,6 +104,30 @@ describe("parsePulpTalents", () => {
     );
     assert.equal(t.name, "Master of Many Things");
   });
+
+  // Some books using this table shape (e.g. Down Darker Trails) print a flat
+  // list with no "(CHOOSE OR ROLL 1D10)"/"Roll" framing and no roll number on
+  // each row.
+  test("parses a table with no roll numbers at all", () => {
+    const text =
+      "TABLE 5: PHYSICAL TALENTS Physical Talent " +
+      "Endurance: gains a bonus die on CON rolls. " +
+      "Tough: soaks up damage. " +
+      "TABLE 6: MISCELLANEOUS TALENTS Miscellaneous Talent " +
+      "Lucky: regains extra Luck points.";
+    assert.deepEqual(parsePulpTalents(text), [
+      { name: "Endurance", category: "physical", description: "Gains a bonus die on CON rolls." },
+      { name: "Tough", category: "physical", description: "Soaks up damage." },
+      { name: "Lucky", category: "miscellaneous", description: "Regains extra Luck points." },
+    ]);
+  });
+
+  test("a curly apostrophe in a rolled-list name is captured whole", () => {
+    const [t] = parsePulpTalents(
+      genTable(6, "MISCELLANEOUS", [[1, "Hunter’s Blood", "tracks well."]]),
+    );
+    assert.equal(t.name, "Hunter’s Blood");
+  });
 });
 
 // --- archetypes ------------------------------------------------------------

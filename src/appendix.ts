@@ -437,6 +437,13 @@ export function parseAppendixSpells(text: string): AppendixSpell[] {
       section.slice(a.afterCast, bodyEnd),
     );
     if (/\.$/.test(name) || name.split(/\s+/).length > 12) continue;
+    // The last spell in a section has no next title to bound it at, falling
+    // back to the section's own end (sliceAppendix, when this is the only
+    // Cost/Casting-time pair found and no Tomes/Artefacts section closes it
+    // either) — which can be the rest of the document. No genuine spell
+    // write-up runs this long, so this is always a false-positive match on
+    // some unrelated "Cost:"/"Casting time:" text, not a real spell.
+    if (description.length > 6000) continue;
     spells.push({
       name,
       castingTime: a.castingTime,

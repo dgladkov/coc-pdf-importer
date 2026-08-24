@@ -13,6 +13,13 @@ import type {
   AppendixTome,
   AppendixArtefact,
 } from "./appendix.ts";
+import type {
+  OldWestItem,
+  OldWestOccupation,
+  OldWestSkill,
+  OldWestWeapon,
+  OldWestSpell,
+} from "./oldwest.ts";
 
 // --- Foundry item documents from parsed items ------------------------------
 
@@ -89,8 +96,11 @@ function archetypeDoc(a: PulpArchetype, source: string): any {
   };
 }
 
-// Hybrid spell: castingTime + legacy costs; body in description; empty costList.
-function spellDoc(s: AppendixSpell, source: string): any {
+// Hybrid spell: castingTime + legacy costs; body in description; empty
+// costList. Shared by Chaosium-appendix spells (AppendixSpell) and Down Darker
+// Trails' differently-sectioned but identically-shaped spells (OldWestSpell) —
+// both files use only the fields read here.
+function spellDoc(s: AppendixSpell | OldWestSpell, source: string): any {
   return {
     name: s.name,
     type: "spell",
@@ -238,8 +248,161 @@ function artefactDoc(a: AppendixArtefact, _source: string): any {
   };
 }
 
+// --- Down Darker Trails: occupations, altered/new skills, weapons ----------
+
+const OCCUPATION_CHARS = ["str", "con", "siz", "dex", "app", "int", "pow", "edu"];
+
+// A CoC7 "occupation" item document. Every characteristic slot must be present
+// (the sheet toggles them individually), so the parsed sparse map is expanded
+// over the full set, unselected/unmarked by default.
+function occupationDoc(o: OldWestOccupation, source: string): any {
+  const occupationSkillPoints = Object.fromEntries(
+    OCCUPATION_CHARS.map((c) => [
+      c,
+      o.occupationSkillPoints[c]
+        ? { multiplier: o.occupationSkillPoints[c].multiplier, selected: true, optional: o.occupationSkillPoints[c].optional }
+        : { multiplier: null, selected: false, optional: false },
+    ]),
+  );
+  const description = o.special
+    ? paragraphs([o.description, `Special: ${o.special}`])
+    : paragraphs([o.description]);
+  return {
+    name: o.name,
+    type: "occupation",
+    system: {
+      description: { value: description, keeper: "" },
+      source,
+      type: { classic: false, lovecraftian: false, modern: false, pulp: true },
+      occupationSkillPoints,
+      creditRating: { min: o.creditRating.min, max: o.creditRating.max },
+      itemDocuments: [],
+      itemKeys: o.skills.map(skillCocid),
+      groups: o.groups.map((g) => ({
+        options: g.options,
+        itemDocuments: [],
+        itemKeys: g.skills.map(skillCocid),
+      })),
+      personal: o.personal,
+      personalText: o.personalText,
+    },
+  };
+}
+
+// A CoC7 "skill" item document for one of the book's altered/new skill
+// write-ups (its plain, unchanged base-percentage list is not imported — that
+// just restates skills already in the system's own compendium).
+function oldWestSkillDoc(s: OldWestSkill): any {
+  return {
+    name: s.name,
+    type: "skill",
+    system: {
+      skillName: s.name,
+      specialization: "",
+      description: { value: paragraphs([s.description]), keeper: "" },
+      base: normalizeSkillBase(s.base),
+      adjustments: { base: 0 },
+      properties: {},
+    },
+  };
+}
+
+// "10%" -> "10"; "EDU%"/"EDU" -> "@EDU"; "half DEX" -> "@DEX/2"; anything else
+// (a formula the sheet wouldn't recognise) falls back to "0".
+function normalizeSkillBase(base: string): string {
+  const pct = base.match(/^(\d+)%?$/);
+  if (pct) return String(Number(pct[1]));
+  if (/^EDU%?$/i.test(base)) return "@EDU";
+  const half = base.match(/^half\s+([A-Z]{3})$/i);
+  if (half) return `@${half[1].toUpperCase()}/2`;
+  return "0";
+}
+
+// The book prints damage with a literal "+DB"/"+half DB" suffix rather than a
+// number (it's the same for every wielder); split it into the CoC7 add-DB
+// flags, matching how the system's own weapons store damage.
+function splitWeaponDamage(raw: string): { damage: string; addb: boolean; ahdb: boolean } {
+  if (/\+half\s+DB$/i.test(raw)) {
+    return { damage: raw.replace(/\+half\s+DB$/i, ""), addb: false, ahdb: true };
+  }
+  if (/\+DB$/i.test(raw)) {
+    return { damage: raw.replace(/\+DB$/i, ""), addb: true, ahdb: false };
+  }
+  return { damage: raw, addb: false, ahdb: false };
+}
+
+// "1 (3)" -> normal "1", max "3" (fires once without penalty, up to 3 with
+// one); "Full Auto" / "1/4" pass through as-is (the system's own uses-per-round
+// field is free text for those cases too).
+function splitUsesPerRound(raw: string): { normal: string; max: string | null } {
+  const m = raw.match(/^(\S+)\s*\((\d+)\)$/);
+  return m ? { normal: m[1], max: m[2] } : { normal: raw, max: null };
+}
+
+// "Touch" -> 0 yards; a leading number ("30 yards", "80 (50)") is kept, its
+// parenthetical alt-mode note dropped; anything else defaults to melee range.
+function normalizeRangeValue(raw: string): string {
+  if (/^touch\b/i.test(raw)) return "0";
+  const m = raw.match(/^(\d+)/);
+  return m ? m[1] : "0";
+}
+
+// A book-printed weapon (Revolvers/Rifles/.../Melee Weapons table) as a
+// standalone reference "weapon" item — its skill is named but not linked to an
+// actor's skill (the system falls back to displaying the name; see CoC7
+// weapon-system.js #getChatDataSkill), same as a compendium weapon would be
+// before an actor's own skill is resolved for it.
+function weaponDoc(w: OldWestWeapon, source: string): any {
+  const { damage, addb, ahdb } = splitWeaponDamage(
+    w.damage.replace(/\s*\([^)]*\)\s*$/, ""),
+  );
+  const damageParts = damage.split("/");
+  const { normal: usesNormal, max: usesMax } = splitUsesPerRound(w.usesPerRound);
+  return {
+    name: w.name,
+    type: "weapon",
+    system: {
+      description: { value: "", special: "", keeper: "" },
+      skill: {
+        main: { name: w.skill, id: "" },
+        alternativ: { name: "", id: "" },
+      },
+      range: {
+        normal: { value: normalizeRangeValue(w.baseRange), damage: damageParts[0] ?? "" },
+        long: { value: "0", damage: damageParts[1] ?? "" },
+        extreme: { value: "0", damage: damageParts[2] ?? "" },
+      },
+      usesPerRound: { normal: usesNormal, max: usesMax, burst: null },
+      bullets: w.bullets,
+      ammo: w.bullets ?? 0,
+      malfunction: w.malfunction,
+      blastRadius: null,
+      properties: {
+        rngd: w.ranged,
+        mnvr: false,
+        thrown: w.thrown,
+        shotgun: false,
+        dbrl: false,
+        impl: w.impale,
+        brst: false,
+        auto: w.auto,
+        ahdb,
+        addb,
+        slnt: false,
+        spcl: false,
+        mont: false,
+        blst: false,
+        stun: false,
+        rare: /^(?:R|VR)$/.test(w.availability),
+        burn: /burn/i.test(w.damage),
+      },
+      price: { downDarkerTrails: w.cost },
+    },
+  };
+}
+
 // Build the Foundry item document for a parsed world item.
-export function pulpItemDoc(item: PulpItem, source: string): any {
+export function pulpItemDoc(item: PulpItem | OldWestItem, source: string): any {
   switch (item.kind) {
     case "talent":
       return talentDoc(item, source);
@@ -251,6 +414,12 @@ export function pulpItemDoc(item: PulpItem, source: string): any {
       return bookDoc(item, source);
     case "artefact":
       return artefactDoc(item, source);
+    case "occupation":
+      return occupationDoc(item, source);
+    case "oldWestSkill":
+      return oldWestSkillDoc(item);
+    case "oldWestWeapon":
+      return weaponDoc(item, source);
   }
 }
 
@@ -263,6 +432,9 @@ const ITEM_TYPE_FOLDERS: Record<string, string> = {
   spell: "Spells",
   tome: "Tomes",
   artefact: "Artefacts",
+  occupation: "Occupations",
+  oldWestSkill: "Skills",
+  oldWestWeapon: "Weapons",
 };
 
 // The icon each item kind gets at creation time (not part of the parsed source
@@ -272,6 +444,7 @@ const ITEM_TYPE_ICONS: Record<string, string> = {
   archetype: "systems/CoC7/assets/icons/skills.svg",
   spell: "systems/CoC7/assets/icons/pentagram-rose.svg",
   tome: "systems/CoC7/assets/icons/secret-book.svg",
+  occupation: "systems/CoC7/assets/icons/skills.svg",
 };
 
 export interface CreatePulpItemsOptions {
@@ -293,7 +466,7 @@ export interface CreatePulpItemsResult {
 // under a region folder when the appendix printed one (Artefacts/Peru/...).
 // Idempotent per leaf folder: a re-import replaces same-named items.
 export async function createPulpItems(
-  items: PulpItem[],
+  items: (PulpItem | OldWestItem)[],
   options: CreatePulpItemsOptions = {},
 ): Promise<CreatePulpItemsResult> {
   const result: CreatePulpItemsResult = { created: 0, items: [] };
@@ -307,9 +480,9 @@ export async function createPulpItems(
 
   // Group by kind, then (for artefacts) by region, so each leaf folder is filled
   // in one pass and re-import replace stays scoped to that folder.
-  type Leaf = { folderPath: string[]; group: PulpItem[] };
+  type Leaf = { folderPath: string[]; group: (PulpItem | OldWestItem)[] };
   const leaves: Leaf[] = [];
-  const byKind = new Map<string, PulpItem[]>();
+  const byKind = new Map<string, (PulpItem | OldWestItem)[]>();
   for (const item of items) {
     const list = byKind.get(item.kind) ?? [];
     list.push(item);
@@ -319,7 +492,7 @@ export async function createPulpItems(
   for (const [kind, group] of byKind) {
     const typeFolder = ITEM_TYPE_FOLDERS[kind] ?? kind;
     if (kind === "artefact") {
-      const byRegion = new Map<string, PulpItem[]>();
+      const byRegion = new Map<string, (PulpItem | OldWestItem)[]>();
       for (const item of group) {
         const region =
           item.kind === "artefact" && item.region ? item.region : "";
@@ -335,7 +508,7 @@ export async function createPulpItems(
       }
     } else if (kind === "tome") {
       // Optional region nesting for tomes (same appendix banners).
-      const byRegion = new Map<string, PulpItem[]>();
+      const byRegion = new Map<string, (PulpItem | OldWestItem)[]>();
       for (const item of group) {
         const region = item.kind === "tome" && item.region ? item.region : "";
         const list = byRegion.get(region) ?? [];
