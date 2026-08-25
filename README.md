@@ -75,7 +75,11 @@ Appendices B–D) yield world items:
 ## Usage
 
 1. Install the module from
-   `https://github.com/Achoobert/coc-pdf-importer/releases/latest/download/module.json`
+
+   ```console
+   https://github.com/dgladkov/coc-pdf-importer/releases/latest/download/module.json
+   ```
+
 2. Go to Settings → Game Settings → Call of Cthulhu PDF Importer → Import button
 3. Upload the document(s) and wait until the import is complete
 4. Navigate to the Actors or Items sidebar. Entries are created in folders named
@@ -111,7 +115,7 @@ the Foundry API, which is what makes them directly testable.
    - the **item parsers** (`pulp.ts`, `appendix.ts`) read pulp talent/archetype
      tables and Chaosium appendix Spells/Tomes/Artefacts into internal
      `PulpItem` structures. Source-faithful data stays unresolved (e.g. skill
-     *names*, not CoCIDs); a document without those sections yields no items.
+     _names_, not CoCIDs); a document without those sections yields no items.
 2. **Import** — `importDocument()` (in `document.ts`) creates the world
    documents:
    - actors via `importCharacters()` (`importer.ts`), which maps each
