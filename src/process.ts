@@ -392,7 +392,9 @@ function headerFromChunks(
     .slice(i + 1, anchorIdx)
     .map((c) => c.text)
     .join(" ");
-  if (/\b(?:age|appears)\s+\d{1,3}\b|,\s*\d{1,3}\+?\s*,/i.test(skipped))
+  if (
+    /\b(?:age|appears)\s+\d{1,3}\b|,\s*\d{1,3}\+?\s*,|\bAge:\s*\d/i.test(skipped)
+  )
     return null;
 
   // Collect the contiguous run at this heading height (name + descriptor, and
@@ -530,14 +532,15 @@ function parseNameRun(
   // heading ("Million Favored Ones : The Dead" -> "... Ones: The Dead").
   const heading = clean(runText)
     .replace(/^Name\s*:?\s*/i, "")
-    .replace(/\s+:\s*/g, ": ");
+    .replace(/\s+:\s*/g, ": ")
+    .replace(STAT_TABLE_COLUMN_HEADER, "");
   if (!heading) return null;
 
   // "ages?"/"appears?": a plural "ages 57, 59, and 60" list is matched from its
   // marker so the whole list is kept out of the name (not just up to the 2nd age).
-  const ageMatch = /,\s*(?:ages?\s+|appears?\s+)?(\d{1,3})\+?\s*(?:,|$)/i.exec(
-    heading,
-  );
+  // A quoted name's closing quote may follow the comma ('"VIOLET SCANLON," age').
+  const ageMatch =
+    /,\s*["']?\s*(?:ages?\s+|appears?\s+)?(\d{1,3})\+?\s*(?:,|$)/i.exec(heading);
   if (ageMatch) {
     return {
       name: clean(heading.slice(0, ageMatch.index)),
@@ -548,7 +551,22 @@ function parseNameRun(
     };
   }
 
-  const comma = heading.indexOf(",");
+  // A trailing parenthetical that itself holds a comma is a descriptor, not a
+  // qualifier ("MISCELLANEOUS RANCH-HANDS (Scanlon's vaqueros, Romero's
+  // cowboys)"); a short one stays in the name ("(Cultist #2)", "(NYC)").
+  const paren = /^(.*?)\s*\(([^()]*,[^()]*)\)\s*$/.exec(heading);
+  if (paren && paren[1]) {
+    // A "(page 283, Keeper's Rulebook)" cross-reference describes nothing.
+    const crossRef = /^\s*(?:see\s+)?page\s+\d/i.test(paren[2]);
+    return {
+      name: clean(paren[1]),
+      age: null,
+      description: crossRef ? "" : trimDescription(paren[2]),
+    };
+  }
+
+  // The name/descriptor comma — outside any parenthetical.
+  const comma = maskParens(heading).indexOf(",");
   if (comma >= 0) {
     return {
       name: clean(heading.slice(0, comma)),
@@ -561,6 +579,11 @@ function parseNameRun(
 
 const DESCRIPTION_MAX = 80; // guard against paragraph-headers bleeding into desc
 
+// The "char. average roll(s)" column-header row of a monster's average/rolls
+// stat table, when it trails a heading or descriptor ("HORSE char. average
+// roll", "devolved humans char. averages roll").
+const STAT_TABLE_COLUMN_HEADER = /\s*\bchar\.?\s+averages?\s+rolls?\s*$/i;
+
 function parseHeader(
   text: string,
   strIndex: number,
@@ -570,16 +593,38 @@ function parseHeader(
 ): ParsedHeader {
   const window = text.slice(winStart, strIndex);
 
+  // Pre-generated investigator sheet (Masks / Two-Headed Serpent campaign
+  // books): "NAME Age: 29 Occupation: Anthropologist Nationality: Australian"
+  // (or "… Archetype: Scholar") directly before STR. The occupation is the
+  // descriptor (it becomes the sheet's occupation).
+  const pregen =
+    /\bAge:\s*(\d{1,3})\b(?:\s*Occupation:\s*([^:]*?))?(?:\s*(?:Nationality|Archetype):\s*[A-Za-z][A-Za-z -]*?)?\s*$/i.exec(
+      window,
+    );
+  if (pregen) {
+    const ageAbs = winStart + pregen.index;
+    const name = extractName(
+      text.slice(Math.max(leftBound, ageAbs - nameLookback), ageAbs),
+    );
+    return {
+      name,
+      age: Number(pregen[1]),
+      description: trimDescription(pregen[2] ?? ""),
+      headerStart: nameStartAbs(text, ageAbs, name),
+    };
+  }
+
   // Preferred form: "<Name>, <age>, <description>" where age may be written
   // "42", "age 42" or "appears 42", and the trailing comma may be absent when
   // the stat block follows immediately (e.g. "Name: Archetype, age 40  STR").
-  // Several candidates can appear in the window (leftover prose from the
-  // previous block); take the one closest to the STR anchor.
+  // A quoted name's closing quote may sit after the comma ('"VIOLET SCANLON,"
+  // age 17'). Several candidates can appear in the window (leftover prose from
+  // the previous block); take the one closest to the STR anchor.
   // "age"/"ages"/"appears" — a group of siblings may share a plural "ages 57, 59,
   // and 60" list. Prefer the last match carrying that explicit marker: it sits at
   // the start of the list, so the name stops before the whole list (a later bare
   // ", 59," is a continuation, not a new name).
-  const ageRe = /,\s*((?:ages?|appears?)\s+)?(\d{1,3})\+?\s*(?:,|(?=\s*$))/gi;
+  const ageRe = /,\s*["']?\s*((?:ages?|appears?)\s+)?(\d{1,3})\+?\s*(?:,|(?=\s*$))/gi;
 
   let best: RegExpMatchArray | null = null;
   let prefixed: RegExpMatchArray | null = null;
@@ -639,7 +684,20 @@ function parseHeader(
   // "Lascars Use this profile for all of the Lascars." or "ASYLUM PATIENTS Use
   // these statistics ...". Truncate at that phrase so the name sits at the end.
   const useMatch = /\bUse\s+(?:this|these|the following)\b/i.exec(window);
-  const nameWindow = useMatch ? window.slice(0, useMatch.index) : window;
+  let nameWindow = useMatch ? window.slice(0, useMatch.index) : window;
+  // Neither a stat table's "char. average roll" column header nor a trailing
+  // "(…, …)" parenthetical (a descriptor — see parseNameRun) belongs to the
+  // name; a column-label row ("#1 #2") may follow the parenthetical.
+  let parenDesc = "";
+  nameWindow = nameWindow
+    .replace(STAT_TABLE_COLUMN_HEADER, "")
+    .replace(
+      /\s*\(([^()]*,[^()]*)\)\s*((?:#?[A-Za-z]?\d+\s*)*)$/,
+      (_m, inner: string, labels: string) => {
+        parenDesc = /^\s*(?:see\s+)?page\s+\d/i.test(inner) ? "" : inner;
+        return " " + labels;
+      },
+    );
 
   // No age, but "<Name>, <description>" right before STR (common in books that
   // print names in caps, e.g. "JOSH WINSCOTT, damned by his legacy", or
@@ -685,7 +743,7 @@ function parseHeader(
   return {
     name,
     age: null,
-    description: "",
+    description: trimDescription(parenDesc),
     headerStart: winStart + nameOffset(nameWindow, name),
   };
 }
@@ -723,7 +781,13 @@ function nameOffset(pre: string, name: string): number {
 // Descriptions are short noun phrases; when a stat block puts a paragraph
 // between the header and STR, bound it so it doesn't swallow prose.
 function trimDescription(raw: string): string {
-  let desc = clean(raw);
+  // A pulp pre-gen's "Archetype: Scholar" annotation after the occupation
+  // ("Medical Doctor Archetype: Scholar") is not part of the descriptor.
+  let desc = clean(
+    clean(raw)
+      .replace(STAT_TABLE_COLUMN_HEADER, "")
+      .replace(/\s*\bArchetype:\s.*$/i, ""),
+  );
   if (desc.length <= DESCRIPTION_MAX) return desc;
   const cut = desc.lastIndexOf(" ", DESCRIPTION_MAX);
   return desc.slice(0, cut > 0 ? cut : DESCRIPTION_MAX);
@@ -750,6 +814,9 @@ const HEADING_WORDS = new Set([
   "TOWNSFOLK",
   "ANIMALS",
   "NPCS",
+  "INTRODUCTION",
+  "CHAPTER",
+  "APPENDIX",
   "AND",
   "OR",
   "OF",
@@ -789,7 +856,13 @@ const NAME_ABBREVIATIONS = new Set([
 ]);
 
 function collectName(pre: string, allowCaps: boolean): string {
-  const tokens = pre.trim().split(/\s+/).filter(Boolean);
+  // A running "APPENDIX D" / "CHAPTER 4" header is never part of a name, and
+  // its letter/number must not survive as a stray token ("D Christine Mei").
+  const tokens = pre
+    .replace(/\b(?:APPENDIX|CHAPTER)\s+[A-Z0-9]{1,2}\b/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
   const collected: string[] = [];
   const limit = allowCaps ? 4 : 8;
 
@@ -993,7 +1066,8 @@ function parseBlock(
   const useLabels = labels.length === numCols && labels.every(isMemberLabel);
   const out: CocCharacter[] = [];
   for (let j = 0; j < numCols; j++) {
-    const label = useLabels ? labels[j] : String(j + 1);
+    // A "#1" column label reads as the ordinal "1".
+    const label = useLabels ? labels[j].replace(/^#/, "") : String(j + 1);
     // Qualify the column label with the group title so members read
     // descriptively ("Cultist Squad A1", "Six Mobsters 3") instead of a bare
     // "A1" / "3". Only when no title could be recovered do we fall back to a
@@ -1128,9 +1202,14 @@ function tokenizeStatHeader(header: string): Map<string, string[]> {
       if (!result.has(current)) result.set(current, []);
       continue;
     }
-    // Only push value-like tokens; skip stray words (unrecognised labels, prose)
-    // so they can't be mistaken for extra group columns.
+    // Only value-like tokens count, and only while they directly follow their
+    // label (or its earlier values). A stray word — prose, a running header
+    // ("CHAPTER 6"), an unrecognised label — ends the label's run of values, so
+    // a number after it can't be mistaken for an extra group column. Bare
+    // punctuation is neutral: "DB : +1D4", a footnote marker "INT * 50", or the
+    // "/" between a creature's two forms' values "Move: 8 (leech) / 6 (host)".
     if (current && isValueToken(token)) result.get(current)!.push(token);
+    else if (!/^[:.,;/*]+$/.test(token)) current = null;
   }
   return result;
 }
@@ -1297,7 +1376,7 @@ function headingName(sectionHeading: string): {
 // ("A1"), or a whole capitalised member name ("Fergie") — not a stray letter or
 // lowercase fragment left behind by letter-spaced PDF text.
 function isMemberLabel(label: string): boolean {
-  return /^[A-Za-z]?\d+$/.test(label) || /^[A-Z][A-Za-z'’.\-]+$/.test(label);
+  return /^#?[A-Za-z]?\d+$/.test(label) || /^[A-Z][A-Za-z'’.\-]+$/.test(label);
 }
 
 // Turn a font-size heading run into a title, repairing letter-spaced fragments
@@ -1426,7 +1505,13 @@ function titleCaseTitle(title: string): string {
 //  - drop commas and a lone trailing squad letter already carried by the labels
 //    ("Cultist Squad A" -> "Cultist Squad").
 function groupNameFromPrefix(prefix: string): string {
-  const tokens = prefix.trim().split(/\s+/).filter(Boolean);
+  // A trailing "(Scanlon's vaqueros, Romero's cowboys)" is a descriptor, not
+  // part of the title (its lowercase words would otherwise end the walk).
+  const tokens = prefix
+    .replace(/\s*\([^()]*,[^()]*\)\s*$/, "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
   let start = tokens.length;
   for (let i = tokens.length - 1; i >= 0 && tokens.length - i <= 12; i--) {
     const token = tokens[i];
@@ -2343,10 +2428,13 @@ function normalizeText(text: string): string {
 // Applied per stat block rather than globally so page offsets stay stable.
 function normalizeLabels(text: string): string {
   return text
-    .replace(/\bAverage\s+Damage\s+Bonus(?=\s*:)/gi, "DB")
-    .replace(/\bDamage\s+Bonus(?=\s*:)/gi, "DB")
+    .replace(/\bAverage\s+Damage\s+Bonus(?:\s*\(DB\))?(?=\s*:)/gi, "DB")
+    .replace(/\bDamage\s+Bonus(?:\s*\(DB\))?(?=\s*:)/gi, "DB")
     .replace(/\bAverage\s+Build(?=\s*:)/gi, "Build")
     .replace(/\bMove\s+Rate(?=\s*:)/gi, "Move")
+    // "Average Move*: 11" (a footnoted average in an animal's stat table).
+    .replace(/\bAverage\s+Move\*?(?=\s*:)/gi, "Move")
+    .replace(/\bAverage\s+Magic\s+Points?(?=\s*:)/gi, "MP")
     .replace(/\bMagic\s+Points?(?=\s*:)/gi, "MP")
     .replace(/\bHit\s+Points?(?=\s*:)/gi, "HP");
 }

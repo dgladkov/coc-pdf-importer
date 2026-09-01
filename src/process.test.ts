@@ -554,6 +554,85 @@ describe("parseCocCharacters (unit)", () => {
     assert.equal(name('JOHN "DE" SILVA'), 'John "De" Silva');
   });
 
+  test("a pre-generated investigator's 'Age: N Occupation: X Nationality: Y' heading", () => {
+    const [c] = parseCocCharacters(
+      "36 INTRODUCTION JANE DOE Age: 29 Occupation: Anthropologist Nationality: Australian " +
+        "STR 50 CON 60 SIZ 55 DEX 60 INT 80 APP 65 POW 60 EDU 85 SAN 60 HP 11 DB: 0 Build: 0 Move: 8 MP: 12",
+    );
+    assert.equal(c.name, "Jane Doe");
+    assert.equal(c.age, 29);
+    assert.equal(c.description, "Anthropologist");
+  });
+
+  test("a quoted name's closing quote after the comma does not hide the age", () => {
+    const [c] = parseCocCharacters(
+      '"JANE DOE," age 17, spawn of something STR 100 CON 130 SIZ 55 DEX 100 INT 55 ' +
+        "APP 15 POW 60 EDU 10 SAN 10 HP 18 DB: +1D4 Build: 1 Move: 11",
+    );
+    assert.equal(c.name, "Jane Doe");
+    assert.equal(c.age, 17);
+    assert.equal(c.description, "spawn of something");
+  });
+
+  test("a trailing 'Archetype: X' annotation is dropped from the descriptor", () => {
+    const [c] = parseCocCharacters(
+      "JANE DOE, 36, Medical Doctor Archetype: Scholar STR 50 CON 80 SIZ 65 DEX 45 INT 70 " +
+        "APP 55 POW 65 EDU 95 SAN 65 HP 29 DB: 0 Build: 0 Move: 7 MP: 13",
+    );
+    assert.equal(c.description, "Medical Doctor");
+  });
+
+  test("'Average Damage Bonus (DB):' is read as the damage bonus, and a stray word ends a label's values", () => {
+    // "CHAPTER 6" (a running header repeating too rarely to be furniture) sits
+    // between POW's value and the HP line; its "6" must not become a second
+    // POW column, and "+6D6" must land in DB rather than HP.
+    const [c] = parseCocCharacters(
+      "Big Lizard, carnivore STR 335 (10D6+32) x5 CON 175 (4D6+21) x5 SIZ 265 (6D6+32) x5 " +
+        "DEX 80 (2D6+9) x5 POW 65 (2D6+6) x5 CHAPTER 6 HP: 44 Average Damage Bonus (DB): +6D6 " +
+        "Average Build: 7 Move: 12 Combat Fighting 60% (30/12), damage 2D6+DB",
+    );
+    assert.equal(c.name, "Big Lizard");
+    assert.equal(c.characteristics.POW!.value, 65);
+    assert.equal(c.characteristics.HP!.value, 44);
+    assert.equal(c.derived.DB, "+6D6");
+    assert.equal(c.derived.Build, 7);
+  });
+
+  test("a '/' or '*' between a label and its value is neutral", () => {
+    const chars = parseCocCharacters(
+      "Leech Host STR 5 50 CON 5 55 SIZ 5 65 POW 35 35 DEX 80 65 INT * 50 (70*) 50 HP: 4 12 " +
+        "Average Damage Bonus: 0 Average Build: 0 Move: 8 (leech) / 6 (animated host) Luck: — " +
+        "Combat Fighting 30% (15/6), damage 1D3",
+    );
+    assert.equal(chars.length, 2);
+    assert.equal(chars[1].derived.Move, 6);
+    assert.equal(chars[0].characteristics.INT!.value, 50);
+  });
+
+  test("the 'char. average roll' column header is not part of a name or descriptor", () => {
+    const [c] = parseCocCharacters(
+      "HORSE char. average roll STR 140 (3D6+18) x5 CON 65 (2D6+6) x5 SIZ 130 (4D6+12) x5 " +
+        "DEX 50 (3D6) x5 POW 50 (3D6) x5 HP: 19 Average Damage Bonus (DB): +2D6 Average Build: 3 " +
+        "Average Move*: 11 Combat Attacks per round: 1 Fighting 25% (12/5), damage 1D8+DB",
+    );
+    assert.equal(c.name, "Horse");
+    assert.equal(c.description, "");
+    assert.equal(c.derived.Move, 11);
+    assert.equal(c.derived.DB, "+2D6");
+  });
+
+  test("a heading's parenthetical holding a comma is a descriptor, not part of the name", () => {
+    const chars = parseCocCharacters(
+      "MISCELLANEOUS RANCH-HANDS (Scanlon's vaqueros, Romero's cowboys) #1 #2 " +
+        "STR 65 60 CON 75 60 SIZ 60 65 DEX 60 65 INT 60 55 APP 45 55 POW 55 50 EDU 50 45 SAN 55 50 HP 13 12 " +
+        "DB: +1D4 +1D4 Build: 1 1 Move: 8 8 Combat Brawl 50% (25/10), damage 1D3+1D4",
+    );
+    assert.deepEqual(
+      chars.map((c) => c.name),
+      ["Miscellaneous Ranch-Hands 1", "Miscellaneous Ranch-Hands 2"],
+    );
+  });
+
   test("the generic NPC member-name fallback keeps its acronym", () => {
     // A group table with numeric column labels and no recoverable title.
     const chars = parseCocCharacters(

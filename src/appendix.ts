@@ -72,6 +72,10 @@ const FURNITURE = [
   /\b(?:SPELLS|TOMES|ARTIFACTS|ARTEFACTS)\b/g,
   // 4+ single letters separated by spaces (running header / footer).
   /(?:^|\s)(?:[A-Za-z]\s){4,}[A-Za-z](?=\s|$)/g,
+  // A page number printed twice at the page head ("631 631"), and Innsmouth's
+  // "Appendices 242" footer. (Lone digits are kept — Cost/Study stats.)
+  /\b(\d{1,3})\s+\1\b(?!\s*[-–]\s*\d)/g,
+  /\bAppendices\s+\d{1,3}\b/g,
 ];
 
 function stripFurniture(s: string): string {
@@ -331,8 +335,15 @@ function normalizeDice(s: string): string {
 
 // --- spells ----------------------------------------------------------------
 
-const TITLE_AT_END =
-  /((?:[A-Z][A-Za-z\u2019'/.-]+(?:\s+(?:of|the|a|an|to|and|from|for|with|in|As|A|[A-Z][A-Za-z\u2019'/.-]+))+|[A-Z][A-Za-z\u2019'/.-]+)(?:\s*\([^)]+\))?)\s*$/;
+// A title is a run of capitalised words (accented letters allowed \u2014
+// "S\u00e9lections de Livre D\u2019Ivon", "\u00c9quinoxe Divis\u00e9") joined by English or French
+// connectors, optionally with a parenthetical.
+// A title word may carry a French elision ("d\u2019Ivon", "l\u2019\u00c9toile") and must start
+// at a word boundary \u2014 the "Ivon" inside "d\u2019Ivon" is not a title on its own.
+const TITLE_WORD = String.raw`(?:[dl][\u2019'])?[A-Z\u00c0-\u00dd][A-Za-z\u00c0-\u00ff\u2019'/.-]+`;
+const TITLE_AT_END = new RegExp(
+  String.raw`(?<![A-Za-z\u00c0-\u00ff\u2019'])((?:${TITLE_WORD}(?:\s+(?:of|the|a|an|to|and|from|for|with|in|As|A|de|du|des|la|le|${TITLE_WORD}))+|${TITLE_WORD})(?:\s*\([^)]+\))?)\s*$`,
+);
 
 const BAD_SPELL_TITLES =
   /^(?:Keeper(?:\s+note)?|NEW SPELLS|SPELLS|TOMES|ARTIFACTS|ARTEFACTS|Note|Marine Magic.*)$/i;
@@ -489,8 +500,12 @@ export function parseStudyUnits(unit: string): string {
 
 // Bibliographic line after the title. Requires a date-ish end so prose like
 // "French merchant," or "written in classical Greek," does not match.
+// The language may carry a qualifier before the comma — "hieroglyphs", or a
+// short phrase ("French commentary on Latin original by Gaspar du Nord,") — and
+// an "Original"/"Classical" prefix. A date may be a decade ("1920s").
+const TOME_LANG_HEAD = String.raw`\b(?:Original\s+)?(?:Classical\s+)?(${TOME_LANG})(?:\s+(?:hieroglyphs|script|language))?(?:\s+[^,•.]{1,60}?)?,`;
 const TOME_META = new RegExp(
-  String.raw`\b(${TOME_LANG})(?:\s+(?:hieroglyphs|script|language))?(?:\s+\w+)?,\s*(?:(?:(?:translated|written)\s+)?by\s+|author(?:\s*\/\s*translation|\s+and\s+translator)?[^,]*,\s*)?[^•]{0,200}?(?:(?:c\.\s*)?\d{3,4}(?:\s*[–-]\s*\d{3,4})?|(?:\d{1,2}(?:st|nd|rd|th)\s+)?century|Dynasty[^•]{0,60}?BCE|BCE|CE|date unknown)\)?\.`,
+  String.raw`${TOME_LANG_HEAD}\s*(?:(?:(?:translated|written)\s+)?by\s+|author(?:\s*\/\s*translation|\s+and\s+translator)?[^,]*,\s*)?[^•]{0,200}?(?:(?:c\.\s*)?\d{3,4}s?(?:\s*[–-]\s*\d{3,4})?|(?:\d{1,2}(?:st|nd|rd|th)\s+)?century|Dynasty[^•]{0,60}?BCE|BCE|CE|date unknown)\)?\.`,
   "gi",
 );
 
@@ -502,16 +517,29 @@ function parseTomeMetadata(meta: string): {
 } {
   const m = meta.match(
     new RegExp(
-      String.raw`^(${TOME_LANG})(?:\s+(?:hieroglyphs|script|language))?(?:\s+\w+)?,\s*(?:(?:(?:translated|written)\s+)?by\s+|author(?:\s*\/\s*translation|\s+and\s+translator)?[^,]*,\s*)?(.+?),\s*((?:c\.\s*)?\d{3,4}|(?:[^.]{0,40}?century)|[^.]{0,80}?(?:Dynasty|BCE|CE|date unknown)[^)]{0,20}?)\)?\.(.*)$`,
+      String.raw`^${TOME_LANG_HEAD.slice(2)}\s*(?:(?:(?:translated|written)\s+)?by\s+|(author(?:\s*\/\s*translation|\s+and\s+translator)?[^,]*),\s*)?(.+?),\s*((?:c\.\s*)?\d{3,4}s?|(?:[^.]{0,40}?century)|(?:c\.\s*)?[^.]{0,80}?(?:Dynasty|BCE|CE|date unknown)[^)]{0,20}?)\)?\.(.*)$`,
       "i",
     ),
   );
   if (m) {
+    let author = cleanSpaces(m[3]);
+    let date = cleanSpaces(m[4]);
+    // "Chinese, author unknown, c. 300 BCE, with commentaries …, date unknown."
+    // — an "author unknown" clause followed directly by the date leaves the
+    // date in the author slot and the later clause as the date.
+    if (m[2] && /^(?:c\.\s*)?\d|BCE|century/i.test(author)) {
+      date = author;
+      author = cleanSpaces(m[2]).replace(/^author(?:\s+and\s+translator)?\s+/i, "");
+    }
+    // "c. Thirteenth Dynasty Egypt (1786-1633 BCE)." — the closing paren was
+    // consumed as the sentence end; restore it.
+    if ((date.match(/\(/g) ?? []).length > (date.match(/\)/g) ?? []).length)
+      date += ")";
     return {
       language: cleanSpaces(m[1]),
-      author: cleanSpaces(m[2]),
-      date: cleanSpaces(m[3]),
-      physical: cleanSpaces(m[4]),
+      author,
+      date,
+      physical: cleanSpaces(m[5]),
     };
   }
   const langOnly = meta.match(new RegExp(String.raw`^(${TOME_LANG})\b`, "i"));
@@ -544,9 +572,15 @@ function cleanTomeTitle(raw: string): string {
   if (period >= 0) s = s.slice(period + 2);
   s = s.replace(/\s+Classical$/i, "");
   s = cleanSpaces(s);
-  // Prefer a full Title Case run (handles "Life As A God").
+  // Prefer a full Title Case run (handles "Life As A God"). A previous tome's
+  // spell list can glue onto the title ("…, Wither Limb The Necronomicon"); a
+  // capitalised "The" inside the run starts the real title.
   const tm = s.match(TITLE_AT_END);
-  if (tm) return cleanSpaces(tm[1]);
+  if (tm) {
+    const run = cleanSpaces(tm[1]);
+    const the = run.search(/\sThe\s/);
+    return the >= 0 ? run.slice(the + 1) : run;
+  }
   // Spell-list remnant then "The Necronomicon".
   const the = s.match(
     /\b((?:The)\s+[A-Z\u2019'][A-Za-z\u2019'/.-]+(?:\s+[A-Z\u2019'][A-Za-z\u2019'/.-]+)*)\s*$/,
