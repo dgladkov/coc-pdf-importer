@@ -12,10 +12,15 @@ import {
   parseOldWestItems,
 } from "./oldwest.ts";
 
+// The occupations chapter's running header — the parser's guard that the text
+// is this book at all (its bullet anchors and names are generic).
+const MARKER = "12 12 OLD WEST INVESTIGATORS ";
+
 describe("parseOldWestOccupations", () => {
   // The book's occupations are printed in a fixed alphabetical order the parser
   // anchors on; "Artist" and "Confidence Trickster" are the first two.
   const TWO_OCCUPATIONS =
+    MARKER +
     "Artist Generic flavor text about artists goes here. " +
     "• Occupation Skill Points: EDU × 2 + (DEX × 2 or POW × 2). " +
     "• Credit Rating: 6–60. " +
@@ -65,6 +70,7 @@ describe("parseOldWestOccupations", () => {
 
   test("tolerates a dropped-cap 'C redit Rating' kerning artifact", () => {
     const text =
+      MARKER +
       "Artist Flavor text here. " +
       "• Occupation Skill Points: EDU × 4. " +
       "• C redit Rating: 9–20. " +
@@ -75,6 +81,17 @@ describe("parseOldWestOccupations", () => {
 
   test("returns [] when no occupation section is present", () => {
     assert.deepEqual(parseOldWestOccupations("just some prose"), []);
+  });
+
+  test("returns [] for another book's occupation list (no Old West running header)", () => {
+    // Pulp Cthulhu / the core rules print the same "Occupation Skill Points:"
+    // bullets and use generic occupation names; without this book's running
+    // header none of it is Old West content.
+    const text =
+      "Doctor Flavor text. • Occupation Skill Points: EDU × 4. • Credit Rating: 30–80. " +
+      "• Suggested Contacts: hospitals. • Skills: First Aid, Medicine. " +
+      "Farmer Flavor. • Occupation Skill Points: EDU × 2 + (DEX × 2 or STR × 2). • Credit Rating: 9–30. • Skills: Natural World.";
+    assert.deepEqual(parseOldWestOccupations(text), []);
   });
 });
 
@@ -231,6 +248,7 @@ describe("parseOldWestSpells", () => {
 describe("parseOldWestItems", () => {
   test("tags each parsed kind and aggregates across occupations/skills/weapons/spells", () => {
     const text =
+      MARKER +
       "Artist Flavor. • Occupation Skill Points: EDU × 4. • Credit Rating: 9–20. • Skills: Climb. " +
       "ALTERED AND NEW SKILLS. ALTERED SKILLS Drive Auto (00%): filler. NEW SKILLS Gambling (10%) filler. EQUIPMENT & WEAPONS " +
       "REVOLVERS • All use the Firearms (Handgun) skill, base 20%. Gun Damage Base Range Uses per Round Bullets Malf. Cost Availability " +

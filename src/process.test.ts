@@ -539,6 +539,33 @@ describe("parseCocCharacters (unit)", () => {
     assert.equal(c.name, '"Swede" Nielsen');
   });
 
+  test("ALL-CAPS proper-casing handles O'/D' particles, slashes, Mc, and quoted connectors", () => {
+    const stats =
+      " STR 60 CON 60 SIZ 60 DEX 60 INT 60 APP 60 POW 60 EDU 60 SAN 60 HP 12 DB: 0 Build: 0 Move: 8";
+    const name = (heading: string) =>
+      parseCocCharacters(heading + ", 40, a person" + stats)[0].name;
+    assert.equal(name("SEAMUS O'SHEA"), "Seamus O'Shea");
+    assert.equal(name("GLA'AKI"), "Gla'aki");
+    assert.equal(name("WANG MA/LO MAI"), "Wang Ma/Lo Mai");
+    assert.equal(name("DENNY MCDAID"), "Denny McDaid");
+    // A connector opening a quoted nickname is capitalised. ("de" is a name
+    // particle the text-path name walk accepts; the book's '"THE DOG"' form
+    // reaches the same rule via the font-size heading path.)
+    assert.equal(name('JOHN "DE" SILVA'), 'John "De" Silva');
+  });
+
+  test("the generic NPC member-name fallback keeps its acronym", () => {
+    // A group table with numeric column labels and no recoverable title.
+    const chars = parseCocCharacters(
+      "1 2 STR 60 50 CON 60 50 SIZ 60 50 DEX 60 50 INT 60 50 APP 60 50 POW 60 50 EDU 60 50 SAN 60 50 HP 12 10 " +
+        "DB: 0 0 Build: 0 0 Move: 8 8 Combat Brawl 50% (25/10), damage 1D3",
+    );
+    assert.deepEqual(
+      chars.map((c) => c.name),
+      ["NPC 1", "NPC 2"],
+    );
+  });
+
   test("an unpaired quote left by name truncation is dropped", () => {
     const [c] = parseCocCharacters(
       '"VIOLET SCANLON, age 17, a monster STR 100 CON 130 SIZ 55 DEX 100 INT 55 ' +

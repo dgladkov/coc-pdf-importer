@@ -128,6 +128,42 @@ describe("parsePulpTalents", () => {
     );
     assert.equal(t.name, "Hunter’s Blood");
   });
+
+  test("a rolled table ends at its last numbered row, not at unnumbered 'Name: text' that follows", () => {
+    // The Pulp tables share their pages with occupation entries whose bullets
+    // ("Credit Rating: 9–70.") look like un-rolled talent rows.
+    const text =
+      genTable(5, "COMBAT", [
+        [1, "Alpha", "aaa."],
+        [10, "Omega", "zzz."],
+      ]) +
+      " 27 CREATING PULP HEROES Aviator • Occupation Skill Points : EDU × 2. • Credit Rating : 30–60. • Skills : Climb, Jump.";
+    assert.deepEqual(
+      parsePulpTalents(text).map((x) => x.name),
+      ["Alpha", "Omega"],
+    );
+    assert.equal(parsePulpTalents(text)[1].description, "Zzz.");
+  });
+
+  test("a rolled last table is not cut short by the un-rolled body cap", () => {
+    // Ten long rows exceed the window used to bound an un-rolled table; a rolled
+    // table's rows end by numbering, so all ten survive intact.
+    const rows: [number, string, string][] = [];
+    for (let r = 1; r <= 10; r++)
+      rows.push([r, `Talent ${"ABCDEFGHIJ"[r - 1]}`, "does something quite useful in play ".repeat(6).trim() + "."]);
+    const talents = parsePulpTalents(genTable(6, "MISCELLANEOUS", rows));
+    assert.equal(talents.length, 10);
+    assert.ok(talents[9].description.endsWith("in play."));
+  });
+
+  test("an un-rolled last row is bounded at a 'NN NN TITLE' running header", () => {
+    const text =
+      "TABLE 8: COMBAT TALENTS Combat Talent " +
+      "Alert: never surprised. " +
+      "Rapid Attack: may attack again. 32 32 INTRODUCTION 33 T he following items and prices are listed.";
+    const t = parsePulpTalents(text);
+    assert.equal(t.find((x) => x.name === "Rapid Attack")!.description, "May attack again.");
+  });
 });
 
 // --- archetypes ------------------------------------------------------------

@@ -216,7 +216,15 @@ function classifySkillSegments(raw: string): {
 const CIVIL_WAR_SIDEBAR =
   /OPTIONAL RULE: INVESTIGATORS WITH CIVIL WAR EXPERIENCE[\s\S]*?viewing a corpse or gross injury\./;
 
+// The occupations chapter's running header. "Occupation Skill Points:" bullets
+// and the occupation names above are generic — Pulp Cthulhu has 66 such bullets
+// and prose containing "Doctor", "Farmer", … — so the anchors alone would parse
+// any investigator rulebook into 22 bogus Old West occupations. Only Down Darker
+// Trails carries this header.
+const OLD_WEST_MARKER = /\bOLD WEST INVESTIGATORS\b/;
+
 export function parseOldWestOccupations(rawText: string): OldWestOccupation[] {
+  if (!OLD_WEST_MARKER.test(rawText)) return [];
   const text = cleanSpaces(
     stripFurniture(rawText).replace(CIVIL_WAR_SIDEBAR, " "),
   );

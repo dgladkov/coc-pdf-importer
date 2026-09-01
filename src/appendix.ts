@@ -433,8 +433,10 @@ export function parseAppendixSpells(text: string): AppendixSpell[] {
         bodyEnd = anchors[i + 1].index;
       }
     }
+    // A boxed spell sidebar's own label ("SPELL:") can trail the body when the
+    // next sidebar's title is what bounds it; it is not part of the text.
     const description = escapeForHtmlLater(
-      section.slice(a.afterCast, bodyEnd),
+      section.slice(a.afterCast, bodyEnd).replace(/\s*\bSPELLS?\s*:\s*$/i, ""),
     );
     if (/\.$/.test(name) || name.split(/\s+/).length > 12) continue;
     // The last spell in a section has no next title to bound it at, falling
@@ -445,7 +447,7 @@ export function parseAppendixSpells(text: string): AppendixSpell[] {
     // some unrelated "Cost:"/"Casting time:" text, not a real spell.
     if (description.length > 6000) continue;
     spells.push({
-      name,
+      name: name.replace(/\*+$/, "").trim(), // footnote marker ("Ecstasy*")
       castingTime: a.castingTime,
       costs: parseSpellCosts(a.cost),
       note: a.note,

@@ -438,16 +438,17 @@ describe("Doors to Darkness", () => {
     chars = await load("CHA23148_-_Doors_to_Darkness_v1.1.pdf");
   });
 
-  test("Andrew Macbride — ALL-CAPS name with age", () => {
-    const c = byName(chars, "ANDREW MACBRIDE");
+  test("Andrew Macbride — ALL-CAPS name with age (title-cased on import)", () => {
+    const c = byName(chars, "Andrew Macbride");
     assert.equal(c.age, 56);
     assert.equal(c.characteristics.STR!.value, 80);
   });
 
   test("NPC named from an ALL-CAPS heading before a description paragraph", () => {
     // "BILL DUNSTON, taciturn tenant  A quiet, sour-faced man ..." — heading far
-    // from STR, recovered by the widened block-start search.
-    const c = byName(chars, "BILL DUNSTON");
+    // from STR, recovered by the widened block-start search. (ALL-CAPS names
+    // are title-cased.)
+    const c = byName(chars, "Bill Dunston");
     assert.ok(c.characteristics.STR);
   });
 
@@ -471,7 +472,7 @@ describe("Quick-Start Rules", () => {
   });
 
   test("RAT PACK — Hard/Extreme profiles and a profile-less maneuver", () => {
-    const c = byName(chars, "RAT PACK");
+    const c = byName(chars, "Rat Pack");
     assert.equal(c.attacksPerRound, "1");
     assert.deepEqual(
       c.combat.find((a) => a.name === "Fighting"),

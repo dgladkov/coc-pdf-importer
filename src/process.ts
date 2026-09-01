@@ -110,6 +110,7 @@ interface TextChunk {
   start: number;
   end: number;
   newline: boolean; // this run begins a new line
+  page?: number; // 1-based page the run was extracted from (0 when unknown)
 }
 
 export interface CocCharacter {
@@ -411,11 +412,18 @@ function headerFromChunks(
   // Split the run into its constituent lines. When one line carries the age
   // ("Iregi Kipkemboi (Cultist #1), 23, ..."), drop any preceding lines — those
   // are group/section titles at the same font size ("Elias' Murderers").
-  const lines: TextChunk[][] = [];
+  let lines: TextChunk[][] = [];
   for (const c of run) {
     if (c.newline || lines.length === 0) lines.push([c]);
     else lines[lines.length - 1].push(c);
   }
+  // A name heading and its descriptor sit on the stat block's own page. A
+  // same-height line on the previous page — an illustration caption ("Buffalo
+  // Bill") or credit at the foot of that page — is not part of the heading,
+  // even though it becomes contiguous once the page number between them is
+  // stripped as furniture.
+  const lastPage = lines[lines.length - 1][0].page ?? 0;
+  lines = lines.filter((line) => (line[0].page ?? 0) === lastPage);
   const lineText = (line: TextChunk[]) => line.map((c) => c.text).join(" ");
   const hasAge = (t: string) =>
     /\b(?:age|appears)\s+\d{1,3}\b|,\s*\d{1,3}\+?\s*,/i.test(t);
@@ -1356,14 +1364,25 @@ const TITLE_CONNECTORS = new Set([
   "al",
 ]);
 
+// Tokens that stay upper-case in a title (the generic member-name fallback).
+const TITLE_ACRONYMS = new Set(["NPC"]);
+
 // Title-case a single title word, keeping connectors lowercase and capitalising
-// each part of a hyphenated compound ("life-sucke" -> "Life-Sucke"). An
-// apostrophe is NOT a word boundary — a possessive ("Scanlon's") or a Mythos
-// name ("Y'hath") keeps its letter after the apostrophe lowercase.
+// each part of a hyphenated or slashed compound ("life-sucke" -> "Life-Sucke",
+// "Ma/lo" -> "Ma/Lo"). An apostrophe is a word boundary only after the surname
+// particles O' / D' / L' ("O'Shea", "D'Arcy"); otherwise it is a possessive or
+// a Mythos name ("Scanlon's", "Gla'aki", "Y'hath") and the letter following it
+// stays lowercase. A "Mc" surname prefix capitalises what follows ("McDaid").
 function titleCaseWord(word: string): string {
   const lower = word.toLowerCase();
   if (TITLE_CONNECTORS.has(lower)) return lower;
-  return lower.replace(/(^|-)([a-z])/g, (_, sep, c) => sep + c.toUpperCase());
+  if (TITLE_ACRONYMS.has(word.toUpperCase())) return word.toUpperCase();
+  return lower
+    .replace(/(^|[-/])([a-z])/g, (_, sep, c) => sep + c.toUpperCase())
+    .replace(/(^|[-/])([ODL]['’])([a-z])/g, (_, sep, p, c) =>
+      sep + p + c.toUpperCase(),
+    )
+    .replace(/(^|[-/])Mc([a-z])/g, (_, sep, c) => sep + "Mc" + c.toUpperCase());
 }
 
 // Title-case a whole group title: connectors stay lowercase (except at the
@@ -1380,10 +1399,15 @@ function titleCaseTitle(title: string): string {
       const word = tok.slice(lead.length, tok.length - trail.length);
       if (!word) return tok; // an all-punctuation token such as "("
       const cased = titleCaseWord(word);
+      // A connector is capitalised at the title's edges and when it opens a
+      // quoted nickname ('Ralph "The Dog" Canino').
       const atEdge = i === 0 || i === tokens.length - 1;
+      const quoted = /["'“‘]/.test(lead);
       return (
         lead +
-        (atEdge ? cased.charAt(0).toUpperCase() + cased.slice(1) : cased) +
+        (atEdge || quoted
+          ? cased.charAt(0).toUpperCase() + cased.slice(1)
+          : cased) +
         trail
       );
     })
@@ -2372,6 +2396,21 @@ const STAT_VALUE_LABELS = new Set(
 function isStatLabel(text: string): boolean {
   return STAT_VALUE_LABELS.has(text.trim().replace(/:$/, "").toUpperCase());
 }
+// Whether a run ends with a stat label — the label alone ("STR"), or a label
+// with its roll formula in an "average / rolls" table ("STR (2D6+6)×5",
+// "EDU 3D6×5*"), after which the average value follows as its own run.
+function endsWithStatLabel(text: string): boolean {
+  const s = text
+    .trim()
+    .replace(/\(?\d*[dD]\d+(?:[+-]\d+)?\)?\s*[×xX]\s*\d+\*?\s*$/, "")
+    .trim();
+  return isStatLabel(s.split(/\s+/).pop() ?? "");
+}
+// A bare roll formula run ("(2D6+6)×5", "3D6×5*") — in some layouts the label,
+// the formula, and the average value are three separate runs.
+function isRollFormula(text: string): boolean {
+  return /^\(?\d*[dD]\d+(?:[+-]\d+)?\)?\s*[×xX]\s*\d+\*?$/.test(text.trim());
+}
 
 function clean(value: unknown): string {
   return String(value ?? "")
@@ -2453,9 +2492,12 @@ function parseActors(pageItems: RawItem[][]): CocCharacter[] {
     height: number;
     text: string;
     newline: boolean;
+    page: number;
   }[] = [];
   let newline = true;
+  let page = 0;
   for (const items of pageItems) {
+    page++;
     for (const it of items) {
       const text = normalizeText(it.str);
       if (text) {
@@ -2468,7 +2510,7 @@ function parseActors(pageItems: RawItem[][]): CocCharacter[] {
         ) {
           last.text += " " + text;
         } else {
-          runs.push({ font: it.font, height: it.height, text, newline });
+          runs.push({ font: it.font, height: it.height, text, newline, page });
         }
         newline = false;
       }
@@ -2497,11 +2539,16 @@ function parseActors(pageItems: RawItem[][]): CocCharacter[] {
       repeats.set(run.text, (repeats.get(run.text) ?? 0) + 1);
   }
   let prev: { text: string } | null = null;
+  let prev2: { text: string } | null = null;
   let prevWasValue = false;
+  const afterStatLabel = () =>
+    !!prev &&
+    (endsWithStatLabel(prev.text) ||
+      (isRollFormula(prev.text) && !!prev2 && endsWithStatLabel(prev2.text)));
   const isFurniture = (run: { text: string; height: number; newline: boolean }) => {
     if (run.height === bodyHeight) return false;
     if (/^[\d ]+$/.test(run.text))
-      return run.newline || !(prev && (isStatLabel(prev.text) || prevWasValue));
+      return run.newline || !(afterStatLabel() || prevWasValue);
     if (isStatBlockToken(run.text)) return false;
     return (repeats.get(run.text) ?? 0) >= 8; // repeated running header/footer
   };
@@ -2512,6 +2559,7 @@ function parseActors(pageItems: RawItem[][]): CocCharacter[] {
   for (const run of runs) {
     const furniture = isFurniture(run);
     prevWasValue = !furniture && /^[\d ]+$/.test(run.text);
+    prev2 = prev;
     prev = run;
     if (furniture) continue;
     if (parts.length) {
@@ -2527,6 +2575,7 @@ function parseActors(pageItems: RawItem[][]): CocCharacter[] {
       start,
       end: offset,
       newline: run.newline,
+      page: run.page,
     });
   }
 

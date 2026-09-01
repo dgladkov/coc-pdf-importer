@@ -35,29 +35,32 @@ const CATEGORY_BY_HEADER: Record<string, TalentCategory> = {
 // this same table shape (e.g. Down Darker Trails) print a flat, un-rolled list
 // instead — "TABLE n: <CATEGORY> TALENTS <Category> Talent" with no "(CHOOSE OR
 // ROLL 1D10)"/"Roll" and no leading roll number on each row — so both the
-// prefix and the row's roll number are optional below. The header is matched in
-// full uppercase so the mixed-case "1. Table 3: Physical Talents" cross-reference
-// list elsewhere on the page is ignored. (Table 5 prints "( CHOOSE" with a stray
-// space, hence the \s* after the paren.)
+// prefix (captured, to tell the two shapes apart) and the row's roll number are
+// optional below. The header is matched in full uppercase so the mixed-case
+// "1. Table 3: Physical Talents" cross-reference list elsewhere on the page is
+// ignored. (Table 5 prints "( CHOOSE" with a stray space, hence the \s* after
+// the paren.)
 const TABLE_HEADER =
-  /TABLE\s+\d+:\s*(PHYSICAL|MENTAL|COMBAT|MISCELLANEOUS)\s+TALENTS\s*(?:\(\s*CHOOSE OR ROLL 1D10\s*\)\s*Roll\s+)?\w+\s+Talent\s+/gi;
+  /TABLE\s+\d+:\s*(PHYSICAL|MENTAL|COMBAT|MISCELLANEOUS)\s+TALENTS\s*(\(\s*CHOOSE OR ROLL 1D10\s*\)\s*Roll\s+)?\w+\s+Talent\s+/gi;
 
-// A table with no roll numbers has nothing to naturally stop the row scan at
-// its last entry (see the loop below), so its body is capped to a window sized
-// for a real table's rows, rather than running to the next TABLE header (which,
-// with no rolls at all, could be pages away) — matching the same-shaped problem
-// (and cap) for the last Pulp archetype's bullet list, below.
+// A rolled table's rows end where their 1..10 numbering ends. A table with no
+// roll numbers has nothing to naturally stop the row scan at its last entry, so
+// when it is the last table its body is capped to a window sized for a real
+// table's rows rather than running to the end of the document — matching the
+// same-shaped problem (and cap) for the last Pulp archetype's bullet list,
+// below.
 const TABLE_BODY_CAP = 1600;
 
 // A talent name is a run of capitalized words (optionally carrying a curly
 // apostrophe, e.g. "Hunter’s Blood"); the description that follows runs until
 // the next row (rolled or not) or a page artifact (the next TABLE header, a
-// running header like "25 CREATING PULP HEROES", or a letter-spaced page footer
-// "s h o o t i n g d e e p o n e s"). The name/description separator is ":" with
-// optional surrounding space ("Alert:" and "Keen Vision : " both occur).
+// running header like "25 CREATING PULP HEROES" or "32 32 INTRODUCTION", or a
+// letter-spaced page footer "s h o o t i n g d e e p o n e s"). The
+// name/description separator is ":" with optional surrounding space ("Alert:"
+// and "Keen Vision : " both occur).
 const NAME = String.raw`[A-Z][A-Za-z][A-Za-z '’/-]*?`;
 const ENTRY = new RegExp(
-  String.raw`(?:(\d{1,2})\s+)?(${NAME})\s*:\s*(.+?)(?=\s+(?:\d{1,2}\s+)?${NAME}\s*:|\s+TABLE\s+\d|\s+\d+\s+[A-Z]{2,}\s+[A-Z]{2,}|\s+(?:[A-Za-z]\s){4,}|$)`,
+  String.raw`(?:(\d{1,2})\s+)?(${NAME})\s*:\s*(.+?)(?=\s+(?:\d{1,2}\s+)?${NAME}\s*:|\s+TABLE\s+\d|\s+\d+\s+[A-Z]{2,}\s+[A-Z]{2,}|\s+\d{1,3}\s+\d{1,3}\s+[A-Z]{3,}|\s+(?:[A-Za-z]\s){4,}|$)`,
   "g",
 );
 
@@ -107,11 +110,14 @@ export function parsePulpTalents(text: string): PulpTalent[] {
   const headers = [...text.matchAll(TABLE_HEADER)];
   for (let h = 0; h < headers.length; h++) {
     const category = CATEGORY_BY_HEADER[headers[h][1].toUpperCase()];
+    const rolled = headers[h][2] !== undefined;
     const start = headers[h].index! + headers[h][0].length;
     const end =
       h + 1 < headers.length
         ? headers[h + 1].index!
-        : Math.min(start + TABLE_BODY_CAP, text.length);
+        : rolled
+          ? text.length
+          : Math.min(start + TABLE_BODY_CAP, text.length);
     const body = text.slice(start, end);
 
     ENTRY.lastIndex = 0;
@@ -119,10 +125,13 @@ export function parsePulpTalents(text: string): PulpTalent[] {
     let lastRoll = 0;
     while ((m = ENTRY.exec(body))) {
       const rollText = m[1];
-      if (rollText !== undefined) {
+      if (rolled) {
+        // Rows are numbered 1..10, strictly increasing. An unnumbered row, or a
+        // non-increasing / out-of-range roll, means we have run past the table
+        // into other text that shares the page (e.g. the "Credit Rating: ..."
+        // occupation bullets printed beside the Pulp tables).
+        if (rollText === undefined) break;
         const roll = Number(rollText);
-        // Rows are numbered 1..10, strictly increasing; a non-increasing or
-        // out-of-range roll means we have run past the table into other prose.
         if (roll <= lastRoll || roll > 10) break;
         lastRoll = roll;
       }
