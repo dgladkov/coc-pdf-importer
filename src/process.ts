@@ -94,6 +94,24 @@ export interface CombatEntry {
 
 export type Skills = Record<string, number>;
 
+// A talent listed in a stat block's "Pulp Talents" section: the printed name
+// and its one-line description ("Alert: never surprised in combat").
+export interface PulpTalentRef {
+  name: string;
+  description: string;
+}
+
+// The Pulp Cthulhu variant some books print inside a stat block: a "Pulp
+// Combat" section whose profiles replace the standard ones, a "Pulp Talents"
+// list, and (Innsmouth) pulp HP / Luck values. Absent from actors without them.
+export interface PulpVariant {
+  attacksPerRound: string | null;
+  combat: CombatEntry[];
+  talents: PulpTalentRef[];
+  hp: number | null;
+  luck: number | null;
+}
+
 // A pre-generated investigator background block ("Personal Description",
 // "Ideology and Beliefs", ...). The presence of one or more of these marks the
 // actor as an Investigator (Foundry "character") rather than an NPC/creature.
@@ -127,6 +145,7 @@ export interface CocCharacter {
   armor: string | null; // e.g. "3-point fur and gristle", "none"; null when absent
   background: BackgroundSection[]; // extracted background sections (may also appear on NPC/villain human stat blocks); the importer decides investigator typing
   items: string[]; // carried gear, from a "Possessions"/"Equipment" list; empty when absent
+  pulp?: PulpVariant; // the block's "Pulp Combat" / "Pulp Talents" sections, when it has them
   notes: string[];
 }
 
@@ -1243,6 +1262,15 @@ function parseBlock(
   }
   const note = parseNoteBeforeCombat(body);
   const notes = note ? [note] : [];
+  // The optional Pulp Cthulhu variant printed inside the block.
+  const pulp = parsePulpVariant(
+    sectionBody(body, "Pulp Combat") ||
+      sectionBody(fallback, "Pulp Combat") ||
+      sectionBody(sharedTail, "Pulp Combat"),
+    sectionBody(body, "Pulp Talents") ||
+      sectionBody(fallback, "Pulp Talents") ||
+      sectionBody(sharedTail, "Pulp Talents"),
+  );
 
   if (numCols <= 1) {
     return [
@@ -1269,6 +1297,7 @@ function parseBlock(
         background,
         items,
         notes,
+        ...(pulp ? { pulp } : {}),
       },
     ];
   }
@@ -1327,6 +1356,7 @@ function parseBlock(
       background,
       items,
       notes,
+      ...(pulp ? { pulp } : {}),
     });
   }
   return out;
@@ -1395,8 +1425,11 @@ function findLabel(masked: string, label: string, min = 0): number {
   const guardLanguages = /^languages$/i.test(label);
   for (let m = re.exec(masked); m; m = re.exec(masked)) {
     if (m.index < min || !isHeadingCase(m[0])) continue;
-    const before = masked.slice(Math.max(0, m.index - 3), m.index);
+    const before = masked.slice(Math.max(0, m.index - 6), m.index);
     if (/[•·]\s*$/.test(before)) continue;
+    // "Pulp Combat" / "Pulp Talents" are their own sections, not the "Combat"
+    // heading of a block that has none.
+    if (/\bPulp\s+$/i.test(before) && !/^pulp/i.test(label)) continue;
     if (
       guardLanguages &&
       /^\s*\d/.test(masked.slice(m.index + m[0].length, m.index + m[0].length + 24))
@@ -1654,6 +1687,8 @@ function titleFromHeading(heading: string): string {
 // made only of those words — reject it so the block falls back to a better
 // source (the Sanity-loss creature name, or the font-size heading).
 function isFurnitureName(name: string): boolean {
+  // Innsmouth's pulp-box header is a section label, not a name.
+  if (/\bPulp (?:Modification|Combat|Talents)\b/.test(name)) return true;
   const words = name.split(/[\s(),.]+/).filter(Boolean);
   return (
     words.length > 0 &&
@@ -1971,6 +2006,108 @@ function parseSpells(text: string): string[] {
         !/^none$/i.test(s) &&
         !/\bnotes?\b/i.test(s),
     );
+}
+
+// The block's Pulp Cthulhu variant from its "Pulp Combat" and "Pulp Talents"
+// sections; undefined when it has neither (the common case).
+function parsePulpVariant(
+  combatText: string,
+  talentText: string,
+): PulpVariant | undefined {
+  const combat = parseCombat(combatText);
+  const attacksPerRound = parseAttacksPerRound(combatText);
+  const { talents, hp, luck } = parsePulpTalentList(talentText);
+  if (!combat.length && !talents.length && hp == null && luck == null)
+    return undefined;
+  return { attacksPerRound, combat, talents, hp, luck };
+}
+
+// A "Pulp Talents" list. Entries read "Name: description." (Masks), "Name
+// (description)" (Two-Headed Serpent), or — Innsmouth — one "M"-glyph bullet
+// each, mixed with pulp "HP: 20" / "Luck: 45" values. A "Note:" entry is prose,
+// not a talent.
+function parsePulpTalentList(text: string): {
+  talents: PulpTalentRef[];
+  hp: number | null;
+  luck: number | null;
+} {
+  const out = {
+    talents: [] as PulpTalentRef[],
+    hp: null as number | null,
+    luck: null as number | null,
+  };
+  if (!text) return out;
+  let s = clean(text)
+    .replace(/\s+:\s*/g, ": ")
+    // A box continued in the next column repeats its header mid-list.
+    .replace(/\bPulp Modification Pulp Talents\b/g, " ¶ ")
+    .replace(/(?:^|\s)M\s+(?=[A-Z])/g, " ¶ ");
+  s = s.replace(/\b(HP|Luck):\s*(\d{1,3})\b\.?/g, (_m, key: string, v: string) => {
+    if (key === "HP") out.hp = Number(v);
+    else out.luck = Number(v);
+    return " ¶ ";
+  });
+  // A new entry starts at a bullet break, or after a sentence end where a
+  // capitalised name is followed by ":" or "(".
+  const parts = s
+    .split(/\s*¶\s*|(?<=[.!?);])\s+(?=[A-Z][A-Za-z'’\- ]{1,40}\s*[:(])/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  for (const part of parts) {
+    const m = /^([A-Z][A-Za-z'’\- ]{1,40}?)\s*(:\s*|\()([\s\S]*)$/.exec(part);
+    if (!m) continue;
+    // A drop-cap kerning glitch splits a name's first letter off ("F leet").
+    let name = clean(m[1]).replace(/^([B-HJ-Z]) (?=[a-z]{2,})/, "$1");
+    if (/\bnotes?\b/i.test(name)) continue;
+    // A talent's text is one sentence (or one parenthetical). Anything after
+    // it is prose that follows the list — and ends it, so a later "Word: …"
+    // in that prose is not read as a talent.
+    let description: string;
+    let leftover: string;
+    if (m[2] === "(") {
+      const inner = balancedParenContent(m[3]);
+      description = inner.text;
+      leftover = inner.rest;
+    } else {
+      const end = sentenceEnd(m[3]);
+      description = m[3].slice(0, end);
+      leftover = m[3].slice(end);
+    }
+    description = clean(description.replace(/[.;]\s*$/, ""));
+    // A talent taken in a specific form ("Psychic Power: Divination 60%") is
+    // named for that form, so the choice is kept when the item is created.
+    const form = /^([A-Z][A-Za-z]+)\s+\d{1,3}%$/.exec(description);
+    if (form) name = `${name} (${form[1]})`;
+    // The books print the text as a lowercase fragment after the name ("Alert:
+    // never surprised in combat"); make it read as a sentence.
+    description = description.charAt(0).toUpperCase() + description.slice(1);
+    if (description) out.talents.push({ name, description });
+    if (/[A-Za-z]/.test(leftover.replace(/^[.;)\s]+/, ""))) break;
+  }
+  return out;
+}
+
+// Index just past the first sentence end in `s` (a "." followed by a space or
+// the end, not an abbreviation's), or s.length when there is none.
+function sentenceEnd(s: string): number {
+  const re = /\.(?=\s|$)/g;
+  for (let m = re.exec(s); m; m = re.exec(s)) {
+    if (/\b(?:e\.g|i\.e|etc|vs|approx)$/i.test(s.slice(0, m.index))) continue;
+    return m.index + 1;
+  }
+  return s.length;
+}
+
+// The content of a parenthetical that `s` opens with (the "(" already
+// consumed), honouring nested parens, plus whatever follows its close.
+function balancedParenContent(s: string): { text: string; rest: string } {
+  let depth = 1;
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === "(") depth++;
+    else if (s[i] === ")" && --depth === 0)
+      return { text: s.slice(0, i), rest: s.slice(i + 1) };
+  }
+  return { text: s, rest: "" };
 }
 
 // The "Sanity loss" statement (monsters only), e.g. "0/1D6 Sanity points to
@@ -2728,6 +2865,9 @@ function isStatBlockToken(text: string): boolean {
   const t = text.trim();
   if (!t) return false;
   if (STAT_BLOCK_LABELS.has(t.toUpperCase())) return true;
+  // Innsmouth boxes its pulp variant under a "Pulp Modification Pulp Talents"
+  // header run — once per NPC, so it repeats like furniture but is a section.
+  if (/\bPulp (?:Combat|Talents)\b/.test(t)) return true;
   // Characteristic / derived values, percents, dice, N/A glyphs. (A bare
   // digit-only run is NOT decided here: it is a stat value or a page number
   // depending on what precedes it — see parseActors.)

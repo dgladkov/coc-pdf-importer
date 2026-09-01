@@ -33,8 +33,10 @@ interface FoundryActor {
 interface FoundryItem {
   id?: string;
   name?: string;
+  type?: string;
   folder?: FoundryFolder | null;
   system?: any;
+  toObject?(): any;
   delete(): Promise<unknown>;
 }
 

@@ -2,6 +2,7 @@ import type {
   BackgroundSection,
   CocCharacter,
   CombatEntry,
+  PulpTalentRef,
 } from "./process.ts";
 
 // Foundry globals (game, ui, Actor, Folder) are declared in ./foundry.d.ts.
@@ -23,6 +24,8 @@ export interface ImportResult {
   created: number;
   failed: number;
   actors: any[];
+  /** How many of `created` are Pulp variants (in the "<folder> (Pulp)" folder). */
+  pulp: number;
 }
 
 /**
@@ -37,11 +40,11 @@ export async function importCharacters(
   // its contents: drop actors already in it that share a name with an incoming
   // one, rather than piling up duplicates.
   await removeReplacedActors(folder, characters);
-  const result: ImportResult = { created: 0, failed: 0, actors: [] };
+  const result: ImportResult = { created: 0, failed: 0, actors: [], pulp: 0 };
 
-  // Look up the system's skill/weapon/spell compendia once for the whole batch,
-  // so imported items adopt the real compendium item (CoCID, icon, properties,
-  // damage) where one exists.
+  // Look up the system's skill/weapon/spell/talent compendia once for the whole
+  // batch, so imported items adopt the real compendium item (CoCID, icon,
+  // properties, damage) where one exists.
   const indexes = await loadIndexes();
 
   for (const character of characters) {
@@ -60,6 +63,37 @@ export async function importCharacters(
         `coc-pdf-importer: failed to import "${character.name}"`,
         err,
       );
+    }
+  }
+
+  // Stat blocks that carry "Pulp Combat" / "Pulp Talents" sections are imported
+  // a second time as their Pulp Cthulhu variant, into a sibling "<folder>
+  // (Pulp)" folder created only when there is at least one of them.
+  const pulpCharacters = characters.filter((c) => c.pulp);
+  if (pulpCharacters.length) {
+    const pulpFolder = await ensureActorFolder(
+      `${options.folderName ?? "PDF Import"} (Pulp)`,
+    );
+    await removeReplacedActors(pulpFolder, pulpCharacters);
+    for (const character of pulpCharacters) {
+      try {
+        const actor = await importCharacter(
+          pulpVariant(character),
+          pulpFolder,
+          options.entity ?? "auto",
+          indexes,
+          talentItems(character.pulp!.talents, indexes.talent),
+        );
+        result.actors.push(actor);
+        result.created++;
+        result.pulp++;
+      } catch (err) {
+        result.failed++;
+        console.error(
+          `coc-pdf-importer: failed to import pulp variant of "${character.name}"`,
+          err,
+        );
+      }
     }
   }
   let msg: string;
@@ -82,6 +116,7 @@ async function importCharacter(
   folder: any,
   entity: EntityType | "auto",
   indexes: CompendiumIndexes,
+  extraItems: any[] = [],
 ): Promise<any> {
   const type = entity === "auto" ? guessEntityType(character) : entity;
 
@@ -93,8 +128,11 @@ async function importCharacter(
   });
 
   const { base, customWeapons } = buildItems(character, indexes);
-  if (base.length) {
-    await actor.createEmbeddedDocuments("Item", base, { renderSheet: false });
+  const embedded = [...base, ...extraItems];
+  if (embedded.length) {
+    await actor.createEmbeddedDocuments("Item", embedded, {
+      renderSheet: false,
+    });
   }
   // Weapons not found in a compendium need a backing skill created and linked by
   // id (the system can't resolve them, which pops a "select weapon skill" modal).
@@ -104,6 +142,76 @@ async function importCharacter(
 
   await applyDerivedOverrides(actor, character);
   return actor;
+}
+
+// ---------------------------------------------------------------------------
+// Pulp variant
+// ---------------------------------------------------------------------------
+
+// The character as its Pulp Cthulhu variant: the "Pulp Combat" profiles replace
+// the standard ones of the same name (others are kept, new ones added), and the
+// pulp HP / Luck values, where printed, replace the standard ones.
+function pulpVariant(character: CocCharacter): CocCharacter {
+  const pulp = character.pulp!;
+  const same = (a: CombatEntry, b: CombatEntry) =>
+    a.name.toLowerCase() === b.name.toLowerCase();
+  const combat = character.combat.map(
+    (entry) => pulp.combat.find((p) => same(p, entry)) ?? entry,
+  );
+  for (const p of pulp.combat)
+    if (!combat.some((entry) => same(entry, p))) combat.push(p);
+  const characteristics = { ...character.characteristics };
+  if (pulp.hp != null)
+    characteristics.HP = { value: pulp.hp, raw: String(pulp.hp), marked: false };
+  const derived = { ...character.derived };
+  if (pulp.luck != null) derived.Luck = pulp.luck;
+  return {
+    ...character,
+    combat,
+    attacksPerRound: pulp.attacksPerRound ?? character.attacksPerRound,
+    characteristics,
+    derived,
+  };
+}
+
+// The talent category flags of a CoC7 talent item; an inline talent built from
+// a stat block has no known category.
+const TALENT_TYPE_FLAGS = [
+  "physical", "mental", "combat", "miscellaneous", "basic", "insane", "other",
+] as const;
+
+// Embedded talent items for a "Pulp Talents" list. A talent already in the
+// world (or the talent compendium) whose name matches — case-insensitively —
+// is used (a full name match means it is the talent the block lists), keeping
+// its icon, category and CoCID but taking the book's own description, so the
+// sheet reads as the stat block does. Any other becomes an inline talent.
+function talentItems(refs: PulpTalentRef[], talentIndex: ItemIndex): any[] {
+  return refs.map((ref) => {
+    const description = escapeHtml(ref.description);
+    const found = talentIndex.get(ref.name.toLowerCase());
+    if (found) {
+      const data = structuredClone(found);
+      delete data._id;
+      data.system = data.system ?? {};
+      data.system.description = {
+        ...(data.system.description ?? {}),
+        value: description,
+      };
+      return data;
+    }
+    return {
+      name: ref.name,
+      type: "talent",
+      system: {
+        source: "",
+        description: { value: description, notes: "", keeper: "" },
+        type: Object.fromEntries(
+          TALENT_TYPE_FLAGS.map((flag) => [flag, flag === "other"]),
+        ),
+        adjustments: [],
+      },
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -282,19 +390,34 @@ interface CompendiumIndexes {
   skill: ItemIndex;
   weapon: ItemIndex;
   spell: ItemIndex;
+  talent: ItemIndex;
 }
 
-// Fetch the system's skill/weapon/spell compendia once (world + packs, best per
-// era/language) and index each by lowercase name and CoCID. Degrades gracefully
-// to empty indexes when the CoC7 API is absent (unit tests, non-CoC7 world), in
-// which case items are built from the parsed data alone.
+// Fetch the system's skill/weapon/spell/talent compendia once (world + packs,
+// best per era/language) and index each by lowercase name and CoCID. Degrades
+// gracefully to empty indexes when the CoC7 API is absent (unit tests, non-CoC7
+// world), in which case items are built from the parsed data alone.
 async function loadIndexes(): Promise<CompendiumIndexes> {
-  const [skill, weapon, spell] = await Promise.all([
+  const [skill, weapon, spell, talent] = await Promise.all([
     loadSkillIndex(),
     loadCocidIndex(/^i\.weapon\./),
     loadCocidIndex(/^i\.spell\./),
+    loadTalentIndex(),
   ]);
-  return { skill, weapon, spell };
+  return { skill, weapon, spell, talent };
+}
+
+// Talents: the world's own talent items (e.g. those a Pulp Cthulhu import
+// created, which carry no CoCID) plus any in the packs.
+async function loadTalentIndex(): Promise<ItemIndex> {
+  const index = await loadCocidIndex(/^i\.talent\./);
+  try {
+    const world = game.items?.filter((i) => i.type === "talent") ?? [];
+    indexDocuments(index, world);
+  } catch (err) {
+    console.warn("coc-pdf-importer: world talent lookup unavailable", err);
+  }
+  return index;
 }
 
 // Skills come from the system's dedicated (cached) skill list.

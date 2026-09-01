@@ -828,6 +828,71 @@ describe("parseCocCharacters (unit)", () => {
     assert.equal(c.combat[0].value, 65);
   });
 
+  test("a block's Pulp Combat / Pulp Talents sections become its pulp variant", () => {
+    const [c] = parseCocCharacters(
+      "Jane Doe, 30, clerk " + STATS + " Luck: 80 " +
+        "Combat Attacks per round: 1 Brawl 60% (30/12), damage 1D3+1D4 or weapon .45 revolver 60% (30/12), damage 1D10+2 Dodge 50% (25/10) " +
+        "Pulp Combat Brawl 80% (40/16), damage 1D3+1D4 or weapon .45 revolver 80% (40/16), damage 1D10+2 Dodge 60% (30/12) " +
+        "Pulp Talents Alert: never surprised in combat. Tough Guy: soaks up damage, may spend 10 Luck points to shrug off up to 5 hit points worth of damage taken in one combat round. " +
+        "Psychic Power : Divination 60%. " +
+        "Skills Charm 45%, Climb 60%. Languages English 85%.",
+    );
+    // The standard block is untouched by the pulp sections.
+    assert.equal(c.combat.find((a) => a.name === "Brawl")!.value, 60);
+    assert.equal(c.skills["Charm"], 45);
+    assert.deepEqual(
+      c.pulp!.combat.map((a) => [a.name, a.value]),
+      [["Brawl", 80], [".45 revolver", 80], ["Dodge", 60]],
+    );
+    assert.deepEqual(c.pulp!.talents, [
+      { name: "Alert", description: "Never surprised in combat" },
+      { name: "Tough Guy", description: "Soaks up damage, may spend 10 Luck points to shrug off up to 5 hit points worth of damage taken in one combat round" },
+      { name: "Psychic Power (Divination)", description: "Divination 60%" },
+    ]);
+    assert.equal(c.pulp!.hp, null);
+  });
+
+  test("a block without pulp sections has no pulp field", () => {
+    const [c] = parseCocCharacters(
+      "Jane Doe, 30, clerk " + STATS + " Combat Brawl 40% (20/8), damage 1D3 Skills Charm 45%.",
+    );
+    assert.equal("pulp" in c, false);
+  });
+
+  test("an Innsmouth pulp box: bulleted talents with pulp HP/Luck, ended by following prose", () => {
+    const chars = parseCocCharacters(
+      "Bob Smith age 30, clerk STR 50 APP 50 CON 50 POW 60 SIZ 45 EDU 45 DEX 70 SAN 60 INT 70 HP 11 DB 0 Build 0 Move 8 MP 15 " +
+        "Skills Climb 40%. COMBAT % damage Brawl 40% (20/8) damage 1D4+1 Dodge 40% (20/16) Pulp Modification Pulp Talents " +
+        "M HP: 20 M Luck: 45 M Fleet Footed: spend 10 Luck to avoid being outnumbered in melee combat for one combat encounter. " +
+        "M Quick Draw: does not need to have their firearm readied to gain +50 DEX for combat. Third Floor A walk runs the perimeter. " +
+        "Failure: the roll fails. Fumble: the roll fumbles.",
+    );
+    const [c] = chars;
+    assert.equal(c.pulp!.hp, 20);
+    assert.equal(c.pulp!.luck, 45);
+    assert.deepEqual(
+      c.pulp!.talents.map((t) => t.name),
+      ["Fleet Footed", "Quick Draw"],
+    );
+    assert.equal(c.pulp!.talents[1].description, "Does not need to have their firearm readied to gain +50 DEX for combat");
+    // The box's stray "Tough Guy" prose does not become a combat entry.
+    assert.deepEqual(c.combat.map((a) => a.name), ["Brawl", "Dodge"]);
+  });
+
+  test("Two-Headed Serpent's parenthesised talents, two of them separated by ';'", () => {
+    const [c] = parseCocCharacters(
+      "Jane Doe, 30, clerk " + STATS + " Combat Brawl 40% (20/8), damage 1D3 Skills Climb 40%. " +
+        "Pulp Talents Rapid Attack (may spend 10 Luck points to gain one further attack in a single combat round); " +
+        "F leet Footed (may spend 10 Luck to avoid being outnumbered (e.g. by two or more) in melee combat) " +
+        "Armor: 1-point scales. Spells: Contact Yig.",
+    );
+    assert.deepEqual(c.pulp!.talents, [
+      { name: "Rapid Attack", description: "May spend 10 Luck points to gain one further attack in a single combat round" },
+      { name: "Fleet Footed", description: "May spend 10 Luck to avoid being outnumbered (e.g. by two or more) in melee combat" },
+    ]);
+    assert.equal(c.armor, "1-point scales");
+  });
+
   test("the generic NPC member-name fallback keeps its acronym", () => {
     // A group table with numeric column labels and no recoverable title.
     const chars = parseCocCharacters(

@@ -1306,3 +1306,85 @@ describe("importCharacters — result and notifications", () => {
     assert.equal(errors.length, 1);
   });
 });
+
+describe("importCharacters — pulp variants", () => {
+  const pulpCharacter = () =>
+    makeCharacter({
+      name: "Pulp Hero",
+      combat: [attack("Brawl", { value: 60, half: 30, fifth: 12 }), attack("Dodge", { value: 50, half: 25, fifth: 10, damage: null })],
+      pulp: {
+        attacksPerRound: null,
+        combat: [attack("Brawl", { value: 80, half: 40, fifth: 16 }), attack("Knife", { value: 70, half: 35, fifth: 14 })],
+        talents: [
+          { name: "Alert", description: "Never surprised in combat" },
+          { name: "Tough Guy", description: "Soaks up damage" },
+        ],
+        hp: 20,
+        luck: 45,
+      },
+    });
+
+  test("a character with pulp sections is imported twice, the variant into '<folder> (Pulp)'", async () => {
+    const result = await importCharacters([makeCharacter({ name: "Plain" }), pulpCharacter()], {
+      folderName: "Book",
+      notify: false,
+    });
+    assert.equal(result.created, 3);
+    assert.equal(result.pulp, 1);
+    assert.deepEqual(folders.map((f) => f.name), ["Book", "Book (Pulp)"]);
+    const pulpFolder = folders.find((f) => f.name === "Book (Pulp)")!;
+    const variants = created.filter((a) => a.folder === pulpFolder.id);
+    assert.deepEqual(variants.map((a) => a.name), ["Pulp Hero"]);
+    assert.equal(created.filter((a) => a.folder === folders[0].id).length, 2);
+  });
+
+  test("no pulp folder is created when no character has pulp sections", async () => {
+    await importCharacters([makeCharacter({ name: "Plain" })], { folderName: "Book", notify: false });
+    assert.deepEqual(folders.map((f) => f.name), ["Book"]);
+  });
+
+  test("pulp combat replaces same-named profiles, keeps the others, adds new ones; pulp HP/Luck apply", async () => {
+    await importCharacters([pulpCharacter()], { folderName: "Book", notify: false });
+    const variant = created.find((a) => a.folder === folders.find((f) => f.name === "Book (Pulp)")!.id)!;
+    const weapons = variant.items.filter((i: any) => i.type === "weapon");
+    const byName = Object.fromEntries(weapons.map((w: any) => [w.name, w]));
+    assert.ok(byName["Knife"], "pulp-only attack added");
+    const skillOf = (name: string) =>
+      variant.items.find((i: any) => i.type === "skill" && new RegExp(name, "i").test(i.name));
+    assert.equal(skillOf("Brawl").system.base, "80");
+    assert.equal(skillOf("Dodge").system.base, "50");
+    assert.equal(variant.system.attribs.hp.value, 20);
+    assert.equal(variant.system.attribs.lck.value, 45);
+    // The standard import keeps its own values.
+    const standard = created.find((a) => a.folder === folders.find((f) => f.name === "Book")!.id)!;
+    assert.equal(
+      standard.items.find((i: any) => i.type === "skill" && /Brawl/i.test(i.name)).system.base,
+      "60",
+    );
+    assert.equal(standard.system.attribs.hp, undefined);
+  });
+
+  test("pulp talents use a same-named world talent (case-insensitive) with the book description, or an inline talent", async () => {
+    (globalThis as any).game.items = {
+      filter: (p: any) =>
+        [
+          { name: "alert", type: "talent", img: "alert.svg", system: { source: "Pulp Cthulhu", type: { combat: true }, description: { value: "Full rules text.", keeper: "GM only" } } },
+          { name: "Alert", type: "weapon" },
+        ].filter(p),
+    };
+    await importCharacters([pulpCharacter()], { folderName: "Book", notify: false });
+    const variant = created.find((a) => a.folder === folders.find((f) => f.name === "Book (Pulp)")!.id)!;
+    const talents = variant.items.filter((i: any) => i.type === "talent");
+    assert.deepEqual(talents.map((t: any) => t.name), ["alert", "Tough Guy"]);
+    // The world item keeps its icon, category and keeper notes but reads as the book does.
+    assert.equal(talents[0].img, "alert.svg");
+    assert.equal(talents[0].system.type.combat, true);
+    assert.equal(talents[0].system.description.value, "Never surprised in combat");
+    assert.equal(talents[0].system.description.keeper, "GM only");
+    assert.equal(talents[1].system.description.value, "Soaks up damage"); // inline
+    assert.equal(talents[1].system.type.other, true);
+    // The standard actor gets no talents.
+    const standard = created.find((a) => a.folder === folders.find((f) => f.name === "Book")!.id)!;
+    assert.equal(standard.items.filter((i: any) => i.type === "talent").length, 0);
+  });
+});

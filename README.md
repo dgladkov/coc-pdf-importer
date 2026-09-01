@@ -54,6 +54,19 @@ Note that the importer skips large portions of description prose — maneuver
 mechanics, creature flavor, and the like — so consult the source documents when
 running the game.
 
+### Pulp variants
+
+Some books (Masks of Nyarlathotep, Escape from Innsmouth, The Two-Headed
+Serpent) print optional **Pulp Combat** and **Pulp Talents** sections inside a
+stat block. Such an actor is imported twice: the standard version into the
+document's folder, and a Pulp variant into a sibling `<file name> (Pulp)` Actor
+folder, created only when the document has at least one. The variant takes the
+pulp combat profiles in place of the standard ones (and, where printed, the
+pulp HP and Luck), and carries its talents as `talent` items. An existing
+talent of the same name in the world is used (icon, category and CoCID kept)
+but reads with the book's own description; otherwise an inline talent with
+that description is created.
+
 ### Pulp Talents & Archetypes
 
 The 40 player talents and 22 archetypes from the Pulp Cthulhu rulebook are

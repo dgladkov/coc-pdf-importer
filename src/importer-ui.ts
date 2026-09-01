@@ -6,6 +6,7 @@ type ImportProgress = {
   created: number;
   failed: number;
   items: number;
+  pulp: number;
   error?: string;
 };
 
@@ -93,6 +94,7 @@ export class PdfImporterConfig extends foundry.applications.api.HandlebarsApplic
       created: 0,
       failed: 0,
       items: 0,
+      pulp: 0,
     }));
     await this.render({ parts: ["progress", "footer"] });
 
@@ -110,6 +112,7 @@ export class PdfImporterConfig extends foundry.applications.api.HandlebarsApplic
         entry.created = result.actors.created;
         entry.failed = result.actors.failed;
         entry.items = result.items.created;
+        entry.pulp = result.actors.pulp;
       } catch (e) {
         entry.status = "error";
         entry.error = e instanceof Error ? e.message : String(e);
@@ -134,7 +137,11 @@ export class PdfImporterConfig extends foundry.applications.api.HandlebarsApplic
           : game.i18n.format("coc-pdf-importer.Progress.Created", {
               created: p.created,
             });
-        return p.items ? `${base} (+${p.items} items)` : base;
+        const extras = [
+          p.pulp ? `${p.pulp} pulp` : "",
+          p.items ? `${p.items} items` : "",
+        ].filter(Boolean);
+        return extras.length ? `${base} (+${extras.join(", +")})` : base;
       }
       case "error":
         return game.i18n.format("coc-pdf-importer.Errors.ErrorProcessing", {
