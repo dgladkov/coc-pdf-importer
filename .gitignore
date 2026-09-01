@@ -6,3 +6,6 @@ node_modules/
 out/
 build/
 golden/
+fvtt.config.js
+
+example_files/

@@ -1,13 +1,17 @@
 import * as pdfjs from "pdfjs-dist";
 import { parsePulpItems } from "./pulp.ts";
 import type { PulpItem } from "./pulp.ts";
+import { parseAppendixItems } from "./appendix.ts";
+import { parseOldWestItems } from "./oldwest.ts";
+import type { OldWestItem } from "./oldwest.ts";
 
 // A processed document: the actor stat blocks plus any pulp reference items
-// (talents, archetypes) as internal structures (not yet Foundry documents). A
-// non-pulp PDF yields items: [].
+// (talents, archetypes, spells/tomes/artefacts, Old West occupations/skills/
+// weapons) as internal structures (not yet Foundry documents). A document with
+// none of these yields items: [].
 export interface ProcessedDocument {
   actors: CocCharacter[];
-  items: PulpItem[];
+  items: (PulpItem | OldWestItem)[];
 }
 
 export type CharacteristicName =
@@ -142,13 +146,19 @@ export function parseCocCharacters(
     ? mostCommonHeight(chunks.filter((c) => c.height > bodyHeight))
     : 0;
 
-  // A characteristics run always starts "STR <value>+ CON". Values are numbers
-  // (optionally marked with *), or a lone "-" (an em/en dash for N/A stats),
+  // A characteristics run always starts "STR <value> … CON". Values are numbers
+  // (optionally marked with *), a lone "-" (em/en dash for N/A), "?", or "n/a",
   // each optionally followed by a "(3D6 x 5)"-style roll formula and/or an
   // "Average Rolls" multiplier printed after the formula ("45 (1D6+6) ×5").
-  const value = String.raw`(?:\d{1,3}\*?|-|[Nn]/[Aa])(?:\s*\([^)]*\))?(?:\s*[×xX]\s*\d+)?`;
+  //
+  // Classic Chaosium order is STR … CON directly. Modern two-column sheets
+  // (Innsmouth et al.) flatten as STR val APP val CON val POW … — so other
+  // characteristic labels may sit between STR's value(s) and CON.
+  const value = String.raw`(?:\d{1,3}\*?|-|\?|[Nn]/[Aa])(?:\s*\([^)]*\))?(?:\s*[×xX]\s*\d+)?`;
+  const midLabel = String.raw`(?:APP|POW|SIZ|EDU|DEX|SAN|INT|HP|DB|Build|Move|MP|Luck)`;
+  const afterStr = String.raw`(?:${value}|${midLabel}\s+${value})`;
   const anchorRe = new RegExp(
-    String.raw`\bSTR\s+${value}(?:\s+${value})*\s+CON\b`,
+    String.raw`\bSTR\s+${value}(?:\s+${afterStr})*\s+CON\b`,
     "g",
   );
   const anchors = Array.from(text.matchAll(anchorRe), (m) => m.index ?? 0);
@@ -278,7 +288,34 @@ function isSpuriousActor(c: CocCharacter): boolean {
 function cleanActorName(name: string): string {
   // Bestiary entries carry a "(page NNN)" cross-reference in their heading
   // ("SHANTAK (page 306)", the unclosed "BYAKHEE (page 283"); drop it.
-  return name.replace(/\s*\(\s*page\s+\d+\s*\)?/i, "").trim();
+  let cleaned = name.replace(/\s*\(\s*page\s+\d+\s*\)?/i, "").trim();
+  // A footnote marker tacked onto a heading ("CATTLE *") carries no meaning
+  // once detached from its footnote text.
+  cleaned = cleaned.replace(/[*†‡]+/g, "");
+  cleaned = stripUnpairedQuote(cleaned);
+  cleaned = clean(cleaned);
+  // Some books print every stat-block name in ALL CAPS ("BILLY THE KID");
+  // proper-case those so they read naturally. A name already in mixed case
+  // (most books) is left untouched so an intentional internal capital (e.g.
+  // "McDonald") is never mangled.
+  return isAllCapsName(cleaned) ? titleCaseTitle(cleaned) : cleaned;
+}
+
+// A quote mark left dangling by name-extraction truncating before its partner
+// (`"VIOLET SCANLON,” age 17` loses its close quote at the comma boundary) is
+// worse than no quote at all; drop the odd one out. A genuinely paired
+// nickname quote ("SWEDE" NIELSEN) is unaffected, since both its marks survive.
+function stripUnpairedQuote(name: string): string {
+  if ((name.match(/"/g) ?? []).length % 2 === 0) return name;
+  const idx = name.lastIndexOf('"');
+  return name.slice(0, idx) + name.slice(idx + 1);
+}
+
+// True when a name's letters are all uppercase (and it has at least one
+// letter) — the convention some books use for stat-block headings.
+function isAllCapsName(name: string): boolean {
+  const letters = name.replace(/[^A-Za-z]/g, "");
+  return letters.length > 0 && letters === letters.toUpperCase();
 }
 
 // ---------------------------------------------------------------------------
@@ -1095,6 +1132,7 @@ function isValueToken(token: string): boolean {
     /^[+-]?\d{1,3}\*?$/.test(token) || // 40, -2, 32*
     /^[+-]?\d*[dD]\d+(?:[+-]\d+)?$/.test(token) || // +1D4, 1D10+5
     token === "-" || // em/en dash (N/A)
+    token === "?" || // unknown / unpublished (Innsmouth EDU ?)
     /^none$/i.test(token)
   );
 }
@@ -1319,29 +1357,35 @@ const TITLE_CONNECTORS = new Set([
 ]);
 
 // Title-case a single title word, keeping connectors lowercase and capitalising
-// each part of a hyphenated compound ("life-sucke" -> "Life-Sucke").
+// each part of a hyphenated compound ("life-sucke" -> "Life-Sucke"). An
+// apostrophe is NOT a word boundary — a possessive ("Scanlon's") or a Mythos
+// name ("Y'hath") keeps its letter after the apostrophe lowercase.
 function titleCaseWord(word: string): string {
   const lower = word.toLowerCase();
   if (TITLE_CONNECTORS.has(lower)) return lower;
-  return lower.replace(
-    /(^|[-'’])([a-z])/g,
-    (_, sep, c) => sep + c.toUpperCase(),
-  );
+  return lower.replace(/(^|-)([a-z])/g, (_, sep, c) => sep + c.toUpperCase());
 }
 
-// Title-case a whole group title: connectors stay lowercase, hyphenated
-// compounds keep each part capitalised, and parenthetical spacing is tightened
-// ("( NYC)" -> "(Nyc)"). Punctuation around a word (parens, commas) is preserved.
+// Title-case a whole group title: connectors stay lowercase (except at the
+// very start or end, e.g. "La Llorona", which are always capitalised),
+// hyphenated compounds keep each part capitalised, and parenthetical spacing
+// is tightened ("( NYC)" -> "(Nyc)"). Punctuation around a word (parens,
+// commas) is preserved.
 function titleCaseTitle(title: string): string {
-  return title
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((tok) => {
+  const tokens = title.split(/\s+/).filter(Boolean);
+  return tokens
+    .map((tok, i) => {
       const lead = tok.match(/^[^A-Za-z]*/)?.[0] ?? "";
       const trail = tok.match(/[^A-Za-z]*$/)?.[0] ?? "";
       const word = tok.slice(lead.length, tok.length - trail.length);
       if (!word) return tok; // an all-punctuation token such as "("
-      return lead + titleCaseWord(word) + trail;
+      const cased = titleCaseWord(word);
+      const atEdge = i === 0 || i === tokens.length - 1;
+      return (
+        lead +
+        (atEdge ? cased.charAt(0).toUpperCase() + cased.slice(1) : cased) +
+        trail
+      );
     })
     .join(" ")
     .replace(/\(\s+/g, "(")
@@ -2283,6 +2327,40 @@ function normalizeLabels(text: string): string {
     .replace(/\bHit\s+Points?(?=\s*:)/gi, "HP");
 }
 
+// Tokens that appear in every stat block (often at a non-body font size). When
+// they repeat across pages they look like furniture — but stripping them kills
+// zigzag / compact layouts (Innsmouth). Keep them in the concatenated text.
+const STAT_BLOCK_LABELS = new Set(
+  [
+    ...CHAR_LABELS,
+    ...DERIVED_LABELS,
+    ...SECTION_LABELS,
+    "damage",
+    "Damage",
+    "DAMAGE",
+    "Fighting",
+    "Dodge",
+    "Brawl",
+    "Attacks",
+    "Average",
+    "Hit",
+    "Points",
+    "Bonus",
+  ].map((l) => l.toUpperCase()),
+);
+
+function isStatBlockToken(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  if (STAT_BLOCK_LABELS.has(t.toUpperCase())) return true;
+  // Characteristic / derived values, percents, dice, N/A glyphs.
+  if (/^[\d.,]+%?$/.test(t)) return true;
+  if (/^[+-]?\d*[dD]\d+(?:[+-]\d+)?$/.test(t)) return true;
+  if (t === "-" || t === "?" || t === "%" || /^n\/a$/i.test(t)) return true;
+  if (/^\(\d+\/\d+\)$/.test(t)) return true;
+  return false;
+}
+
 function clean(value: unknown): string {
   return String(value ?? "")
     .replace(/\s+/g, " ")
@@ -2390,16 +2468,23 @@ function parseActors(pageItems: RawItem[][]): CocCharacter[] {
   // Identify page furniture (running headers/footers, side titles): non-body
   // runs whose exact text repeats across many pages. Genuine headings — even
   // group titles — appear once, so they are kept.
+  //
+  // Innsmouth (and similar) print characteristic labels/values at a slightly
+  // non-body height; they repeat once per NPC and must NOT be stripped or the
+  // whole book loses every STR…CON anchor.
   const bodyHeight = mostCommonHeight(runs);
   const repeats = new Map<string, number>();
   for (const run of runs) {
     if (run.height !== bodyHeight)
       repeats.set(run.text, (repeats.get(run.text) ?? 0) + 1);
   }
-  const isFurniture = (run: { text: string; height: number }) =>
-    run.height !== bodyHeight &&
-    ((repeats.get(run.text) ?? 0) >= 8 || /^[\d ]+$/.test(run.text)); // repeats or page numbers
-
+  const isFurniture = (run: { text: string; height: number }) => {
+    if (run.height === bodyHeight) return false;
+    if (isStatBlockToken(run.text)) return false;
+    return (
+      (repeats.get(run.text) ?? 0) >= 8 || /^[\d ]+$/.test(run.text)
+    ); // repeats or page numbers
+  };
   // Build the concatenated text and the parallel chunk list with offsets.
   const chunks: TextChunk[] = [];
   const parts: string[] = [];
@@ -2431,8 +2516,13 @@ function parseActors(pageItems: RawItem[][]): CocCharacter[] {
 // parsers touch Foundry — turning items into world documents is the importer's job.
 export async function processPDF(data: Uint8Array): Promise<ProcessedDocument> {
   const pageItems = await extractPages(data);
+  const text = pagesToText(pageItems);
   return {
     actors: parseActors(pageItems),
-    items: parsePulpItems(pagesToText(pageItems)),
+    items: [
+      ...parsePulpItems(text),
+      ...parseAppendixItems(text),
+      ...parseOldWestItems(text),
+    ],
   };
 }
