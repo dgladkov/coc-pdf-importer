@@ -8,7 +8,11 @@ Requires Foundry VTT v13+.
 
 Tested on the following documents:
 
-- Masks of Nyarlathotep (Keeper Reference Booklet)
+- Masks of Nyarlathotep (campaign book and Keeper Reference Booklet)
+- Escape from Innsmouth
+- The Two-Headed Serpent (campaign book and Keeper Reference Booklet)
+- Down Darker Trails (setting book and Keeper Reference Booklet)
+- Pulp Cthulhu
 - CoC7 Quick Start
 - CoC7 Keeper Rulebook (Part 3: Scenarios)
 - Gateways to Terror
@@ -16,20 +20,25 @@ Tested on the following documents:
 - Dead Light and Other Dark Turns
 - Does Love Forgive
 - Mansions of Madness
-- Pulp Cthulhu
+- The Lightless Beacon
 
 A single import reads a document once and creates both **actors** and, when the
-document contains them, **items** (Pulp Cthulhu talents/archetypes, and Chaosium
-appendix Spells / Tomes / Artefacts). Everything is placed in folders named
+document contains them, **items** (Pulp Cthulhu talents/archetypes, Chaosium
+appendix Spells / Tomes / Artefacts, and Down Darker Trails' Old West
+occupations, skills, weapons and spells). Everything is placed in folders named
 after the source file; a re-import refreshes same-named entries instead of
 duplicating them.
 
 ### Actors
 
 Import actors from the various flavors of the standard stat block layout —
-ordinary "Name, age N, description" blocks as well as multi-column table stat
-blocks for NPC groups. Each block yields characteristics, derived stats, combat,
-skills, languages, spells, Sanity loss, and armor.
+"Name, age N, description" blocks, pre-generated investigator sheets, monster
+"average / rolls" tables, multi-column tables for NPC groups, and the
+two-column layouts of the newer books (Innsmouth). Each block yields
+characteristics, derived stats, combat, skills, languages, spells, Sanity loss,
+armor, and — for pre-gens — the background sections and gear. Names printed in
+ALL CAPS are proper-cased on import, and a stat block never absorbs text from
+beyond its own pages, so long scenario prose stays out of the sheets.
 
 Where the CoC7 system has a matching compendium item, the importer adopts it so
 imported content keeps the real CoCID, icon, and properties:
@@ -53,14 +62,21 @@ their core characteristic(s), bonus points, suggested occupations/traits, talent
 count, and a resolved skill list (each skill mapped to its CoCID itemKey).
 
 Items are filed in a `<file name>` **Item** folder with one subfolder per type
-(`Talents`, `Archetypes`, `Spells`, `Tomes`, `Artefacts`); actors live at the
-top level of a same-named **Actor** folder. (Foundry keeps Actor and Item
+(`Talents`, `Archetypes`, `Spells`, `Tomes`, `Artefacts`, …); actors live at
+the top level of a same-named **Actor** folder. (Foundry keeps Actor and Item
 folders in separate trees, so these are two sibling folders of the same name.)
+
+### Down Darker Trails
+
+The Old West sourcebook's reference chapters are imported as items: the 26
+occupations, its altered and new skills, the firearm and melee weapon tables,
+and the shamanic / folk magic spells.
 
 ### Spells, Tomes & Artefacts
 
 Books that include Chaosium appendix sections (e.g. Masks of Nyarlathotep
-Appendices B–D) yield world items:
+Appendices B–D), or that print appendix-style entries inline in their chapters
+(Escape from Innsmouth), yield world items:
 
 - **Spells** — name, casting time, legacy cost fields (MP / SAN / POW / HP), and
   description body. Automated `costList` steps are not generated.
@@ -100,8 +116,9 @@ Appendices B–D) yield world items:
 
 ### How it works
 
-Parsing is split from Foundry entirely: `process.ts` and `pulp.ts` never touch
-the Foundry API, which is what makes them directly testable.
+Parsing is split from Foundry entirely: `process.ts`, `pulp.ts`, `appendix.ts`
+and `oldwest.ts` never touch the Foundry API, which is what makes them directly
+testable.
 
 1. **Extraction & parsing** — `processPDF()` (in `process.ts`) uses `pdfjs-dist`
    to read every page's text runs **once**, keeping each run's font size. From
@@ -109,13 +126,15 @@ the Foundry API, which is what makes them directly testable.
    `{ actors, items }`:
    - the **actor parser** strips repeating page furniture, finds stat-block
      anchors (the `STR … CON` run), recovers each block's name/age/description
-     (using font size to separate a heading from body prose), and parses the
-     stats into `CocCharacter`s. Multi-column group tables expand to one
-     character per column.
-   - the **item parsers** (`pulp.ts`, `appendix.ts`) read pulp talent/archetype
-     tables and Chaosium appendix Spells/Tomes/Artefacts into internal
-     `PulpItem` structures. Source-faithful data stays unresolved (e.g. skill
-     _names_, not CoCIDs); a document without those sections yields no items.
+     (using font size and page boundaries to separate a heading from body
+     prose), and parses the stats into `CocCharacter`s. Multi-column group
+     tables expand to one character per column.
+   - the **item parsers** (`pulp.ts`, `appendix.ts`, `oldwest.ts`) read pulp
+     talent/archetype tables, Chaosium appendix Spells/Tomes/Artefacts, and the
+     Down Darker Trails reference chapters into internal item structures. Each
+     is guarded by its book's own section markers, so a document without those
+     sections yields no items. Source-faithful data stays unresolved (e.g. skill
+     _names_, not CoCIDs).
 2. **Import** — `importDocument()` (in `document.ts`) creates the world
    documents:
    - actors via `importCharacters()` (`importer.ts`), which maps each
