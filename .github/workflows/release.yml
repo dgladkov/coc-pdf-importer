@@ -117,3 +117,7 @@ jobs:
           bodyFile: release-notes.md
           artifacts: build/module.zip,build/module.json
           makeLatest: true
+          # GITHUB_TOKEN needs the repository's "Workflow permissions" set to
+          # read/write to create releases; a RELEASE_TOKEN secret (a PAT with
+          # Contents: read & write) works regardless, when present.
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
