@@ -633,6 +633,80 @@ describe("parseCocCharacters (unit)", () => {
     );
   });
 
+  test("a comma-less 'Name age N, descriptor' heading beats an earlier sidebar entry", () => {
+    const [c] = parseCocCharacters(
+      "Notable Folk M Jane Roe, 34, human, the manager. M Grant Adam, 39, hybrid, foreman. " +
+        "Jerome Bicknell age 34, distillery operator STR 70 APP 55 CON 70 POW 60 SIZ 60 EDU 70 " +
+        "DEX 55 SAN 48 INT 85 HP 13 DB +1D4 Build 1 Move 7 MP 12 Combat Brawl 40% (20/8), damage 1D3",
+    );
+    assert.equal(c.name, "Jerome Bicknell");
+    assert.equal(c.age, 34);
+    assert.equal(c.description, "distillery operator");
+  });
+
+  test("a closing quote after a sentence period is a name boundary", () => {
+    const [c] = parseCocCharacters(
+      'Details are found in Lovecraft\'s "The Thing on the Doorstep." Morris Grimes age 56, cemetery keeper ' +
+        "STR 85 CON 80 SIZ 90 DEX 40 INT 40 APP 15 POW 30 EDU 10 SAN 10 HP 17 DB +1D6 Build 2 Move 5",
+    );
+    assert.equal(c.name, "Morris Grimes");
+  });
+
+  test("the book's index (dot leaders) ends the last block's body", () => {
+    const [c] = parseCocCharacters(
+      "Jane Doe, 30, clerk STR 50 CON 50 SIZ 50 DEX 50 INT 50 APP 50 POW 50 EDU 50 SAN 50 HP 10 " +
+        "DB: 0 Build: 0 Move: 8 MP: 10 Traits: nervous and quick. " +
+        "INDEX Backstory . . . . . . . 13 Ill Luck (Spell) . . . . . 158 Treasured Possession . . . 14",
+    );
+    assert.deepEqual(c.background, [{ title: "Traits", text: "nervous and quick" }]);
+  });
+
+  // Font-size runs with page numbers, for the page-based bounds. Body text is
+  // 9pt, name headings 11pt, section titles taller.
+  function chunked(runs: { t: string; h?: number; p?: number }[]) {
+    const chunks: any[] = [];
+    let text = "";
+    for (const r of runs) {
+      if (text) text += " ";
+      const start = text.length;
+      text += r.t;
+      chunks.push({ text: r.t, height: r.h ?? 9, start, end: text.length, newline: true, page: r.p ?? 1 });
+    }
+    return { text, chunks };
+  }
+  const STATS =
+    "STR 50 CON 50 SIZ 50 DEX 50 INT 50 APP 50 POW 50 EDU 50 SAN 50 HP 10 DB: 0 Build: 0 Move: 8 MP: 10";
+
+  test("a block's body never runs past the page after its STR line", () => {
+    const { text, chunks } = chunked([
+      { t: "Jane Doe, 30, clerk", h: 11, p: 2 },
+      { t: STATS + " Combat Brawl 40% (20/8), damage 1D3 Traits: cunning and dangerous.", p: 2 },
+      { t: "The scenario continues on the next page with more about the town.", p: 3 },
+      { t: "Nothing on this later page concerns her at all; it is another chapter entirely.", p: 5 },
+      { t: "Bob Roe, 40, farmer", h: 11, p: 8 },
+      { t: STATS + " Combat Brawl 30% (15/6), damage 1D3", p: 8 },
+    ]);
+    const [jane] = parseCocCharacters(text, chunks);
+    assert.equal(jane.name, "Jane Doe");
+    const traits = jane.background.find((b) => b.title === "Traits")!.text;
+    assert.ok(traits.startsWith("cunning and dangerous"));
+    assert.ok(!traits.includes("Nothing on this later page"), traits);
+  });
+
+  test("a heading is searched on the STR page and the one before only; a tall title there names the block", () => {
+    const { text, chunks } = chunked([
+      { t: "With thanks to John D. Rateliff, and Dean Engelhardt. Thanks to all of the backers.", p: 1 },
+      { t: "Pages of rules text follow, none of it about anyone in particular.", p: 3 },
+      { t: "AVERAGE MOOK", h: 17, p: 5 },
+      { t: "STR 40 CON 50 SIZ 50 DEX 45 INT 30 APP 30 POW 30 EDU 40 SAN 30 HP 10 DB: 0 Build: 0 Move: 7 MP: 6 " +
+          "Brawl 35% (17/7), damage 1D3 Dodge 25% (12/5) Skills: none.", p: 5 },
+      { t: "Jane Doe, 30, clerk", h: 11, p: 9 },
+      { t: STATS + " Combat Brawl 40% (20/8), damage 1D3", p: 9 },
+    ]);
+    const names = parseCocCharacters(text, chunks).map((c) => c.name);
+    assert.deepEqual(names, ["Average Mook", "Jane Doe"]);
+  });
+
   test("the generic NPC member-name fallback keeps its acronym", () => {
     // A group table with numeric column labels and no recoverable title.
     const chars = parseCocCharacters(

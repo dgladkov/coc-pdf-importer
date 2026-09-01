@@ -171,13 +171,24 @@ export function parseCocCharacters(
   // truncate the name).
   const AGE_WINDOW = 240;
   const NAME_LOOKBACK = 90;
+  // The offset where a page begins (the start of its first run), for bounding
+  // the header search: a block's heading is on the STR line's page or the one
+  // before it — never further back, however far the previous stat block is.
+  const pageStart = (page: number): number => {
+    for (const c of chunks ?? []) if ((c.page ?? 0) >= page) return c.start;
+    return 0;
+  };
+  const pageOfIndex = (index: number): number =>
+    chunks?.find((c) => c.start <= index && index < c.end)?.page ?? 0;
   const headers = anchors.map((strIndex, i) => {
-    const leftBound = i > 0 ? anchors[i - 1] : 0;
+    let leftBound = i > 0 ? anchors[i - 1] : 0;
+    const strPage = pageOfIndex(strIndex);
+    if (strPage > 1) leftBound = Math.max(leftBound, pageStart(strPage - 1));
     const winStart = Math.max(leftBound, strIndex - AGE_WINDOW);
     const window = text.slice(winStart, strIndex);
     // Prefer the name heading recovered from font size; fall back to the
     // text-only heuristics when there is no distinct heading run.
-    const header =
+    let header =
       (chunks &&
         headerFromChunks(
           chunks,
@@ -193,6 +204,26 @@ export function parseCocCharacters(
     const sectionHeading: SectionHeading = chunks
       ? sectionHeadingFromChunks(chunks, strIndex, leftBound, bodyHeight)
       : { text: "", start: -1 };
+    // A tall heading ("AVERAGE MOOK", set above name height) that sits between
+    // a weak text-path name and STR is the block's real title. Weak: a lone
+    // word the wide prose "Word, lowercase …" search picked up ("Naturally, a
+    // hero's …"). A name from the near-window forms ("Tun-Tun, white gorilla")
+    // is kept over the section title above it.
+    if (
+      header.weak &&
+      header.name.split(/\s+/).length < 2 &&
+      sectionHeading.start > header.headerStart &&
+      !/^spells?\b/i.test(sectionHeading.text)
+    ) {
+      const titled = headingName(sectionHeading.text);
+      if (titled.name)
+        header = {
+          name: titled.name,
+          age: null,
+          description: titled.description,
+          headerStart: sectionHeading.start,
+        };
+    }
     return {
       strIndex,
       header,
@@ -203,7 +234,17 @@ export function parseCocCharacters(
     };
   });
 
-  // The body of each block runs from its STR to the start of the next block.
+  // The body of each block runs from its STR to the start of the next block —
+  // but never past the page after the one its STR line is on. Without that,
+  // a block followed by pages of scenario prose (or the book's index) keeps all
+  // of it in its last section: a 70 000-character "Traits".
+  const pageOf = (index: number): number =>
+    chunks?.find((c) => c.start <= index && index < c.end)?.page ?? 0;
+  const pageEnd = (page: number): number => {
+    let end = -1;
+    for (const c of chunks ?? []) if ((c.page ?? 0) <= page) end = c.end;
+    return end;
+  };
   const blocks = anchors.map((strIndex, i) => {
     // Bound at the next block's section-title heading when it has one: the title
     // reliably delimits the next block even when that block's name heuristic
@@ -213,6 +254,20 @@ export function parseCocCharacters(
     if (i + 1 < headers.length) {
       const next = headers[i + 1];
       bodyEnd = next.headingStart > strIndex ? next.headingStart : next.headerStart;
+    }
+    const strPage = pageOf(strIndex);
+    if (strPage > 0) {
+      const limit = pageEnd(strPage + 1);
+      if (limit > strIndex && limit < bodyEnd) bodyEnd = limit;
+    }
+    // The book's index (dot leaders: "INDEX Backstory . . . . . 13") follows the
+    // last stat block directly; nothing of a block lies beyond it — nor beyond
+    // the last sentence before it (the index heading and first entry).
+    const leaders = /(?:\.\s){4,}/.exec(text.slice(strIndex, bodyEnd));
+    if (leaders) {
+      const head = text.slice(strIndex, strIndex + leaders.index);
+      const stop = head.lastIndexOf(". ");
+      bodyEnd = strIndex + (stop >= 0 ? stop + 1 : leaders.index);
     }
     // Text between this block's start and its STR anchor. Some group tables print
     // the shared Combat/Skills sections here, ahead of the stat table. Start at
@@ -237,8 +292,15 @@ export function parseCocCharacters(
     // of its own. Such lines belong to a set (e.g. "Mr. Smith" then "Mrs. Smith",
     // or a creature's two forms) whose shared section is printed after the last
     // line, so inherit it from the next section-bearing block in the run.
+    //
+    // Not when the "name" was picked out of a prose list, though (a bare
+    // connector is left as the descriptor — see isSpuriousActor): a bare line
+    // with such a name is no stat block and must not borrow a real one's
+    // sections. (A block with sections of its own is kept; only its name is
+    // bad.)
     let sharedTail = "";
     if (!bodyHasSections(block.body)) {
+      if (CONNECTOR_DESCRIPTION.test(description.trim())) return;
       for (let j = i + 1; j < blocks.length; j++) {
         if (bodyHasSections(blocks[j].body)) {
           sharedTail = blocks[j].body;
@@ -275,14 +337,13 @@ export function parseCocCharacters(
 // list ("... John D. Rateliff, and Dean ..."), leaving a bare-connector
 // description and an otherwise empty block (only characteristics — no combat,
 // skills, or spells). A genuine minimal creature has a real description.
+const CONNECTOR_DESCRIPTION = /^(?:and|or|the|a|an|but|of|with|to|for)$/i;
 function isSpuriousActor(c: CocCharacter): boolean {
   const empty =
     c.combat.length === 0 &&
     Object.keys(c.skills).length === 0 &&
     c.spells.length === 0;
-  return (
-    empty && /^(?:and|or|the|a|an|but|of|with|to|for)$/i.test((c.description ?? "").trim())
-  );
+  return empty && CONNECTOR_DESCRIPTION.test((c.description ?? "").trim());
 }
 
 // Final tidy-up of an actor's name.
@@ -328,6 +389,7 @@ interface ParsedHeader {
   age: number | null;
   description: string;
   headerStart: number; // absolute index in `text` where the name starts
+  weak?: boolean; // found by the wide prose "Word, lowercase …" search only
 }
 
 // The font size carrying the most characters (body text by default).
@@ -634,6 +696,32 @@ function parseHeader(
   }
   best = prefixed ?? best;
 
+  // Comma-less form, "<Name> age 56, <description>" (Innsmouth's headings). A
+  // "Notable Folk" sidebar in the same window lists people in the classic
+  // ", 38, hybrid, ..." form, so whichever candidate sits closest to STR is the
+  // heading.
+  let bare: RegExpMatchArray | null = null;
+  for (const m of window.matchAll(/\bage\s+(\d{1,3})\s*,\s*/gi)) bare = m;
+  if (
+    bare &&
+    (!best || (bare.index ?? 0) >= (best.index ?? 0) + best[0].length)
+  ) {
+    const ageAbs = winStart + (bare.index ?? 0);
+    const name = extractName(
+      text.slice(Math.max(leftBound, ageAbs - nameLookback), ageAbs),
+    );
+    if (name) {
+      return {
+        name,
+        age: Number(bare[1]),
+        description: trimDescription(
+          text.slice(ageAbs + bare[0].length, strIndex),
+        ),
+        headerStart: nameStartAbs(text, ageAbs, name),
+      };
+    }
+  }
+
   if (best) {
     const commaAbs = winStart + (best.index ?? 0);
     const descAbs = commaAbs + best[0].length;
@@ -733,6 +821,7 @@ function parseHeader(
         age: null,
         description: trimDescription(m[2]),
         headerStart: nameAbs,
+        weak: true,
       };
     }
     break; // only consider the first (block-start) candidate
@@ -873,10 +962,11 @@ function collectName(pre: string, allowCaps: boolean): string {
       HEADING_WORDS.has(token.replace(/[^A-Za-z]/g, "").toUpperCase())
     )
       break;
-    // A word ending in "." is a sentence boundary (the name is after it), unless
-    // it is an initial ("B.") or a title abbreviation ("Dr.", "Lt.").
+    // A word ending in "." (or a closing quote after it: 'Doorstep."') is a
+    // sentence boundary (the name is after it), unless it is an initial ("B.")
+    // or a title abbreviation ("Dr.", "Lt.").
     if (
-      /\.$/.test(token) &&
+      /\.["']?$/.test(token) &&
       !/^[A-Z]\.$/.test(token) &&
       !NAME_ABBREVIATIONS.has(token.replace(/[^A-Za-z]/g, "").toUpperCase())
     ) {
