@@ -1,4 +1,16 @@
-name: Release latest
+name: Release
+
+# Cuts a GitHub release when a release commit lands on main — one that bumps
+# `version` in module.json (and points `download` at the versioned asset URL),
+# e.g. "Release 1.0.8". Any other push is a no-op. The release is tagged with
+# the bare version ("1.0.8"), named the same, ships build/module.zip +
+# build/module.json, and its notes list the commits since the previous release
+# tag in the established format:
+#
+#   * <sha> <subject>
+#   …
+#
+#   **Full Changelog**: https://github.com/<repo>/compare/<prev>...<version>
 
 on:
   push:
@@ -12,41 +24,96 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          fetch-depth: 0 # full history + tags: needed for the changelog
+
+      - name: Detect a release commit
+        id: version
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./module.json').version")
+          # The most recent version tag reachable from this commit (bare
+          # "1.0.7"-style tags only; ignore any other tags on the branch).
+          PREV=$(git tag --merged HEAD --list '[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1 || true)
+          # The release commit itself — the newest one that made module.json's
+          # version / download what they are now — is what gets tagged and
+          # built, even if later commits landed in the same push.
+          field() { git show "$1:module.json" 2>/dev/null | node -p "try{const m=JSON.parse(require('fs').readFileSync(0,'utf8'));m.version+' '+m.download}catch{''}"; }
+          SHA=""
+          for c in $(git log --format=%H -- module.json); do
+            cur=$(field "$c"); prev=$(field "$c^")
+            case "$cur" in "$VERSION "*) if [ "$cur" != "$prev" ]; then SHA=$c; break; fi ;; esac
+          done
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "previous=$PREV" >> "$GITHUB_OUTPUT"
+          echo "sha=${SHA:-$GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          if [ "$VERSION" = "$PREV" ]; then
+            echo "module.json version $VERSION is already released — nothing to do."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          elif git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
+            echo "Tag $VERSION already exists but is not an ancestor of main — refusing to re-release."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Release commit ${SHA:-$GITHUB_SHA} for $VERSION (previous release: ${PREV:-none})."
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.version.outputs.release == 'true'
+        name: Check out the release commit
+        run: git checkout --quiet '${{ steps.version.outputs.sha }}'
+
+      - if: steps.version.outputs.release == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
           cache: npm
 
-      - run: npm ci
+      - if: steps.version.outputs.release == 'true'
+        run: npm ci
 
-      - name: Install 7-Zip
+      - if: steps.version.outputs.release == 'true'
+        name: Install 7-Zip
         run: sudo apt-get update && sudo apt-get install -y p7zip-full
 
-      - name: Patch module.json for rolling release
+      - if: steps.version.outputs.release == 'true'
+        name: Check the manifest points at this release
         run: |
-          node --input-type=module <<'EOF'
-          import fs from 'node:fs';
-          const m = JSON.parse(fs.readFileSync('module.json', 'utf8'));
-          m.version = `1.0.${process.env.GITHUB_RUN_NUMBER}`;
-          m.manifest =
-            'https://github.com/dgladkov/coc-pdf-importer/releases/latest/download/module.json';
-          m.download =
-            'https://github.com/dgladkov/coc-pdf-importer/releases/latest/download/module.zip';
-          fs.writeFileSync('module.json', JSON.stringify(m, null, 2) + '\n');
-          console.log(`version=${m.version}`);
-          EOF
+          set -euo pipefail
+          VERSION='${{ steps.version.outputs.version }}'
+          EXPECTED="https://github.com/${{ github.repository }}/releases/download/$VERSION/module.zip"
+          DOWNLOAD=$(node -p "require('./module.json').download")
+          if [ "$DOWNLOAD" != "$EXPECTED" ]; then
+            echo "::error::module.json download is '$DOWNLOAD'; a release commit must set it to '$EXPECTED'."
+            exit 1
+          fi
 
-      - run: npm run build:module
+      - if: steps.version.outputs.release == 'true'
+        run: npm run build:module
 
-      - uses: ncipollo/release-action@v1
+      - if: steps.version.outputs.release == 'true'
+        name: Write release notes
+        run: |
+          set -euo pipefail
+          VERSION='${{ steps.version.outputs.version }}'
+          PREV='${{ steps.version.outputs.previous }}'
+          SHA='${{ steps.version.outputs.sha }}'
+          {
+            if [ -n "$PREV" ]; then
+              git log --format='* %h %s' "$PREV..$SHA"
+              echo
+              echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/$PREV...$VERSION"
+            else
+              git log --format='* %h %s' "$SHA"
+            fi
+          } > release-notes.md
+          cat release-notes.md
+
+      - if: steps.version.outputs.release == 'true'
+        uses: ncipollo/release-action@v1
         with:
-          tag: latest
-          name: Latest
-          allowUpdates: true
-          replacesArtifacts: true
-          makeLatest: true
+          tag: ${{ steps.version.outputs.version }}
+          name: ${{ steps.version.outputs.version }}
+          commit: ${{ steps.version.outputs.sha }}
+          bodyFile: release-notes.md
           artifacts: build/module.zip,build/module.json
-          body: |
-            Rolling build from `main` @ ${{ github.sha }}
-            Version `1.0.${{ github.run_number }}`
+          makeLatest: true
