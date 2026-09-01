@@ -2353,12 +2353,24 @@ function isStatBlockToken(text: string): boolean {
   const t = text.trim();
   if (!t) return false;
   if (STAT_BLOCK_LABELS.has(t.toUpperCase())) return true;
-  // Characteristic / derived values, percents, dice, N/A glyphs.
+  // Characteristic / derived values, percents, dice, N/A glyphs. (A bare
+  // digit-only run is NOT decided here: it is a stat value or a page number
+  // depending on what precedes it — see parseActors.)
   if (/^[\d.,]+%?$/.test(t)) return true;
   if (/^[+-]?\d*[dD]\d+(?:[+-]\d+)?$/.test(t)) return true;
   if (t === "-" || t === "?" || t === "%" || /^n\/a$/i.test(t)) return true;
   if (/^\(\d+\/\d+\)$/.test(t)) return true;
   return false;
+}
+
+// A characteristic / derived-stat label run ("STR", "HP", "DB:", "Luck") — what
+// precedes a bare value run in a compact layout that sets each label and value
+// as its own text item.
+const STAT_VALUE_LABELS = new Set(
+  [...CHAR_LABELS, ...DERIVED_LABELS].map((l) => l.toUpperCase()),
+);
+function isStatLabel(text: string): boolean {
+  return STAT_VALUE_LABELS.has(text.trim().replace(/:$/, "").toUpperCase());
 }
 
 function clean(value: unknown): string {
@@ -2470,27 +2482,38 @@ function parseActors(pageItems: RawItem[][]): CocCharacter[] {
   // group titles — appear once, so they are kept.
   //
   // Innsmouth (and similar) print characteristic labels/values at a slightly
-  // non-body height; they repeat once per NPC and must NOT be stripped or the
-  // whole book loses every STR…CON anchor.
+  // non-body height, each label and each value as its own run; they repeat once
+  // per NPC and must NOT be stripped or the whole book loses every STR…CON
+  // anchor. A bare number at non-body height is therefore ambiguous: a page
+  // number (the classic case — always furniture) or such a stat value. They are
+  // told apart by context: a value run continues the line of a stat label run
+  // ("STR" "60"), or of another value run in a multi-column table ("STR" "60"
+  // "75"); a page number starts its own line (after prose, a running header, or
+  // a page break — even when the previous page happened to end on a value).
   const bodyHeight = mostCommonHeight(runs);
   const repeats = new Map<string, number>();
   for (const run of runs) {
     if (run.height !== bodyHeight)
       repeats.set(run.text, (repeats.get(run.text) ?? 0) + 1);
   }
-  const isFurniture = (run: { text: string; height: number }) => {
+  let prev: { text: string } | null = null;
+  let prevWasValue = false;
+  const isFurniture = (run: { text: string; height: number; newline: boolean }) => {
     if (run.height === bodyHeight) return false;
+    if (/^[\d ]+$/.test(run.text))
+      return run.newline || !(prev && (isStatLabel(prev.text) || prevWasValue));
     if (isStatBlockToken(run.text)) return false;
-    return (
-      (repeats.get(run.text) ?? 0) >= 8 || /^[\d ]+$/.test(run.text)
-    ); // repeats or page numbers
+    return (repeats.get(run.text) ?? 0) >= 8; // repeated running header/footer
   };
   // Build the concatenated text and the parallel chunk list with offsets.
   const chunks: TextChunk[] = [];
   const parts: string[] = [];
   let offset = 0;
   for (const run of runs) {
-    if (isFurniture(run)) continue;
+    const furniture = isFurniture(run);
+    prevWasValue = !furniture && /^[\d ]+$/.test(run.text);
+    prev = run;
+    if (furniture) continue;
     if (parts.length) {
       parts.push(" ");
       offset += 1;

@@ -22,6 +22,12 @@ const FILES = [
   "CHA23172_-_Does_Love_Forgive_-_V5",
   "CHA23178-Book3-Scenarios-2026-download",
   "The Lightless Beacon - Call of Cthulhu",
+  "CHA23151_-_Down_Darker_Trails_Keeper_Reference_Booklet_v1.1",
+  "CHA23151_-_Down_Darker_Trails_v1.2",
+  "CHA23153_-_Masks_of_Nyarlathotep_v1.9",
+  "CHA23196_Call_of_Cthulhu_Innsmouth",
+  "The Two-Headed Serpent - Keeper Reference Booklet",
+  "The Two-Headed Serpent",
 ];
 
 async function readOrNull(path: string): Promise<Buffer | null> {

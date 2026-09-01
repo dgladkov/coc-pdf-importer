@@ -7,13 +7,22 @@ fresh checkout and the integration suite cannot run without manual setup.
 
 To enable them, place the following documents in this directory:
 
+ * CHA23107-_Pulp_Cthulhu_v1.7.pdf
  * CHA23131 Call of Cthulhu 7th Edition Quick-Start Rules.pdf
  * CHA23140_-_Gateways_to_Terror_1.1.pdf
  * CHA23148_-_Doors_to_Darkness_v1.1.pdf
+ * CHA23151_-_Down_Darker_Trails_Keeper_Reference_Booklet_v1.1.pdf
+ * CHA23151_-_Down_Darker_Trails_v1.2.pdf
  * CHA23153_-_Masks_of_Nyarlathotep_-_Keeper_Reference_Booklet_v3.pdf
+ * CHA23153_-_Masks_of_Nyarlathotep_v1.9.pdf
  * CHA23159_-_Dead_Light_and_Other_Dark_Turns.pdf
+ * CHA23167_-_Mansions_of_Madness_v1.7.pdf
+ * CHA23172_-_Does_Love_Forgive_-_V5.pdf
  * CHA23178-Book3-Scenarios-2026-download.pdf
+ * CHA23196_Call_of_Cthulhu_Innsmouth.pdf
  * The Lightless Beacon - Call of Cthulhu.pdf
+ * The Two-Headed Serpent - Keeper Reference Booklet.pdf
+ * The Two-Headed Serpent.pdf
 
 Then:
 
