@@ -770,6 +770,64 @@ describe("parseCocCharacters (unit)", () => {
     ]);
   });
 
+  test("a creature's stat lines typeset after a following group table are its own", () => {
+    // Masks booklet: "Sample Children of the Sphinx" is printed between the
+    // Black Sphinx's description and its Fighting/Skills/Armor/Spells/Sanity
+    // lines; the Children keep only their table.
+    const chars = parseCocCharacters(
+      "The Big Beast, spawn of something A monstrous spawn. " +
+        "STR 800 CON 400 SIZ 1750 DEX 45 INT 05 APP - POW 375 EDU - SAN - HP 85 DB: +15D6 Build: 16 Move: 8 MP: 75 Luck: - " +
+        "Combat Attacks per round: 3 (smash, grab, or munch) Tentacle Grab (mnvr): grabs its victim first. " +
+        "SAMPLE CHILDREN OF THE BEAST Cheetah Bull STR 40 60 CON 75 75 SIZ 70 70 DEX 50 40 INT 30 15 POW 55 55 HP 14 14 " +
+        "DB 0 +1D4 Build 0 1 Move 7 7 MP 11 11 Attack Bite Gore Fighting 60% (30/12), damage 15D6 " +
+        "Tentacle Grab (mnvr) 40% (20/10), allows a munch Skills Sense Prey 35%. Armor: 19-point hide. " +
+        "Spells: Contact Something. Sanity loss: 1D4/1D8 Sanity points to see the Big Beast in full.",
+    );
+    const beast = chars.find((c) => c.name === "The Big Beast")!;
+    assert.equal(beast.combat[0].damage, "15D6");
+    assert.equal(beast.skills["Sense Prey"], 35);
+    assert.equal(beast.armor, "19-point hide");
+    assert.deepEqual(beast.spells, ["Contact Something"]);
+    assert.match(beast.sanityLoss ?? "", /Big Beast/);
+    assert.equal(beast.attacksPerRound, "3 (smash, grab, or munch)");
+    const cheetah = chars.find((c) => /Cheetah$/.test(c.name))!;
+    assert.deepEqual(cheetah.combat, []);
+    assert.equal(cheetah.armor, null);
+    assert.equal(cheetah.sanityLoss, null);
+  });
+
+  test("a section-less group does not inherit an unrelated creature's sections", () => {
+    // Masks book: the Children table is followed by the Black Pharaoh.
+    const chars = parseCocCharacters(
+      "SAMPLE CHILDREN OF THE BEAST Cheetah Bull STR 40 60 CON 75 75 SIZ 70 70 DEX 50 40 INT 30 15 POW 55 55 HP 14 14 " +
+        "DB 0 +1D4 Build 0 1 Move 7 7 MP 11 11 Attack Bite Gore " +
+        "The Dark King, avatar of something Tall and haughty. STR 105 CON 75 SIZ 75 DEX 90 INT 430 APP - POW 500 EDU - SAN - " +
+        "HP 15 DB: +1D6 Build: 2 Move: 9 MP: 100 Combat Attacks per round: 1 per two rounds (energy blast) " +
+        "Energy Blast automatic, damage 20 points Armor: none. Sanity loss: 0/1D2 Sanity points to see the Dark King in his human aspect.",
+    );
+    const cheetah = chars.find((c) => /Cheetah$/.test(c.name))!;
+    assert.deepEqual(cheetah.combat, []);
+    assert.equal(cheetah.sanityLoss, null);
+    assert.equal(cheetah.attacksPerRound, null);
+    // A bare line under a generic-kind Sanity line still shares it (two forms of one creature).
+    const forms = parseCocCharacters(
+      "Ssathasaa, serpent person STR 60 CON 55 SIZ 55 DEX 75 INT 90 APP - POW 120 EDU - SAN - HP 11 DB: 0 Build: 0 Move: 8 MP: 24 " +
+        "Ssathasaa, as Bertha Shipley STR 20 CON 40 SIZ 40 DEX 30 INT 45 APP 45 POW 40 EDU 30 SAN - HP 8 DB: -1 Build: -1 Move: 5 MP: 8 " +
+        "Combat Attacks per round: 1 Fighting 60% (30/12), damage 1D3 Dodge 30% (15/6) Skills Stealth 70%. " +
+        "Sanity loss: 0/1D6 Sanity points to see a serpent person.",
+    );
+    assert.equal(forms[0].combat.length, 2);
+    assert.match(forms[0].sanityLoss ?? "", /serpent person/);
+  });
+
+  test("'Fighting Brawl NN%' is read as the Brawl attack", () => {
+    const [c] = parseCocCharacters(
+      "Jane Doe, 30, clerk " + STATS + " Combat Attacks per round: 1 Fighting Brawl 65% (32/13), damage 1D3+1D4 Dodge 35% (17/7)",
+    );
+    assert.equal(c.combat[0].name, "Brawl");
+    assert.equal(c.combat[0].value, 65);
+  });
+
   test("the generic NPC member-name fallback keeps its acronym", () => {
     // A group table with numeric column labels and no recoverable title.
     const chars = parseCocCharacters(

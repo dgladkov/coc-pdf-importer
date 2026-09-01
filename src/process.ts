@@ -292,7 +292,7 @@ export function parseCocCharacters(
     };
   });
 
-  const characters: CocCharacter[] = [];
+  const parsedBlocks: CocCharacter[][] = [];
   let profileRun: { base: string; first: CocCharacter; count: number } | null =
     null;
 
@@ -313,7 +313,12 @@ export function parseCocCharacters(
       if (CONNECTOR_DESCRIPTION.test(description.trim())) return;
       for (let j = i + 1; j < blocks.length; j++) {
         if (bodyHasSections(blocks[j].body)) {
-          sharedTail = blocks[j].body;
+          // Not from a block whose Sanity-loss line names some other creature:
+          // a section-less group table ("Sample Children of the Sphinx")
+          // followed by an unrelated monster ("… to see the Black Pharaoh")
+          // shares nothing with it.
+          if (!namesOtherCreature(parseSanityLoss(blocks[j].body), name))
+            sharedTail = blocks[j].body;
           break;
         }
       }
@@ -355,8 +360,59 @@ export function parseCocCharacters(
     } else {
       profileRun = null;
     }
-    characters.push(...parsed);
+    parsedBlocks.push(parsed);
   });
+
+  // A creature's stat lines can be typeset *after* a group table that follows
+  // its prose (the Masks booklet prints "Sample Children of the Sphinx" between
+  // the Black Sphinx's description and its Fighting/Skills/Armor/Spells/Sanity
+  // lines), so the group's members would carry the creature's sections and the
+  // creature none. When a section-less single block precedes a group whose
+  // Sanity-loss line names that creature, the sections are its.
+  for (let i = 0; i + 1 < parsedBlocks.length; i++) {
+    const [one] = parsedBlocks[i];
+    const group = parsedBlocks[i + 1];
+    if (parsedBlocks[i].length !== 1 || group.length < 2) continue;
+    const bare =
+      one.combat.length === 0 &&
+      Object.keys(one.skills).length === 0 &&
+      one.spells.length === 0 &&
+      !one.sanityLoss;
+    const core = one.name.replace(/^the\s+/i, "").toLowerCase();
+    const named =
+      core.length > 3 && (group[0].sanityLoss ?? "").toLowerCase().includes(core);
+    if (!bare || !named) continue;
+    const src = group[0];
+    // The creature's attack profiles sit in the group table's stat-header
+    // region (after its "Attack Bite Gore …" row), where a multi-column block
+    // never reads profiles; parse them from there when the group carries none.
+    let combat = src.combat;
+    if (combat.length === 0) {
+      const body = normalizeLabels(blocks[i + 1].body);
+      const header = body
+        .slice(0, statHeaderEnd(body))
+        .replace(/\bAttack\b[^%]*?(?=\b[A-Z][A-Za-z]+\s+\d{1,3}\s*%)/, " ");
+      combat = parseCombat(header);
+    }
+    Object.assign(one, {
+      combat,
+      skills: src.skills,
+      spells: src.spells,
+      sanityLoss: src.sanityLoss,
+      armor: src.armor,
+      attacksPerRound: one.attacksPerRound ?? src.attacksPerRound,
+    });
+    for (const m of group)
+      Object.assign(m, {
+        combat: [],
+        skills: {},
+        spells: [],
+        sanityLoss: null,
+        armor: null,
+        attacksPerRound: null,
+      });
+  }
+  const characters = parsedBlocks.flat();
 
   return characters
     .map((c) => ({ ...c, name: cleanActorName(c.name) }))
@@ -368,6 +424,23 @@ export function parseCocCharacters(
 // description and an otherwise empty block (only characteristics — no combat,
 // skills, or spells). A genuine minimal creature has a real description.
 const CONNECTOR_DESCRIPTION = /^(?:and|or|the|a|an|but|of|with|to|for)$/i;
+
+// Whether a Sanity-loss line ("0/1D2 Sanity points to see the Black Pharaoh
+// …") names a creature other than `name`: the creature it names is not part of
+// this name, nor is this name mentioned in the line (a creature's second form
+// — "Panther Form" under "… to see Neris in panther form" — still counts as
+// the same creature).
+function namesOtherCreature(sanityLoss: string | null, name: string): boolean {
+  const other = nameFromSanityLoss(sanityLoss);
+  if (!other || !name || !sanityLoss) return false;
+  // Only a proper name counts ("the Black Pharaoh"); "a serpent person" or "a
+  // shoggoth lord" names the kind of creature the block itself is.
+  const at = sanityLoss.toLowerCase().indexOf(other.toLowerCase());
+  if (at < 0 || !/[A-Z]/.test(sanityLoss[at])) return false;
+  const mine = name.replace(/^the\s+/i, "").toLowerCase();
+  const theirs = other.toLowerCase();
+  return !mine.includes(theirs) && !sanityLoss.toLowerCase().includes(mine);
+}
 function isSpuriousActor(c: CocCharacter): boolean {
   const empty =
     c.combat.length === 0 &&
@@ -2129,6 +2202,12 @@ function parseCombat(text: string): CombatEntry[] {
   // "1D3 - 1") so the trailing operand isn't read as the start of the next attack
   // ("1D3 - 1 Dodge" would otherwise leave damage "1D3 -" and read "1 Dodge").
   text = text.replace(/(\d)\s*([+-])\s*(\d)/g, "$1$2$3");
+
+  // The Masks campaign book prints a few brawl profiles as "Fighting Brawl
+  // 65%" where its Keeper booklet (and every other layout) has "Brawl 65%";
+  // read it as "Brawl" so the same stat block yields the same attack in either
+  // edition.
+  text = text.replace(/\bFighting Brawl\b/g, "Brawl");
 
   // Some books label the half/fifth values, with or without % signs and spaces:
   // "(Hard 20/Extreme 8)" or "(Hard 25%/Extreme10%)" -> "(20/8)" / "(25/10)".
