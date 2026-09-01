@@ -6,6 +6,7 @@
   "scripts": {
     "build": "node build.js",
     "build:module": "node tools/build-module.js",
+    "release": "node tools/release.js",
     "dev": "node build.js --watch",
     "type-check": "tsc --noEmit",
     "test": "node --experimental-strip-types --import ./node-setup.ts --test ./src/*.test.ts",

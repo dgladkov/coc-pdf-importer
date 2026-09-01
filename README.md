@@ -173,6 +173,10 @@ Foundry user data folder (e.g. `/Users/YOU/foundrydata`). Builds then land in
   `templates`)
 - `npm run build:module` — **release** build → `build/module.zip` +
   `build/module.json` (requires 7-Zip)
+- `npm run release` — interactive: shows the current version, asks for the new
+  one, and commits the version bump (`module.json` + `package.json`) as
+  `Release <version>`; pushing `main` then lets the release workflow tag,
+  build and publish it
 - `npm run type-check` — `tsc --noEmit` over `src/`, `test/`, `tools/`
 - `npm test` — unit tests (fast, fixture-free, CI)
 - `npm run test:integration` — book-level tests + golden snapshots — **needs the
