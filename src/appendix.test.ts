@@ -381,6 +381,63 @@ Gospel of Yig
   });
 });
 
+describe("parseAppendixTomes — inline entries (Innsmouth-style)", () => {
+  // No TOMES appendix: tome entries sit inline in a chapter, bulleted with the
+  // "M" glyph, dated "15 th century" (superscript ordinal, no period) or
+  // "by Author, 1862 – 1874" running straight into the description, and listing
+  // "Suggested Spells:".
+  const TEXT =
+    "Prose about a library. THE MYTHOS SHELF Pnakotic Manuscripts English, author and translator unknown, 15 th century " +
+    "This bound manuscript is a partial copy of a greater work. " +
+    "M Sanity Loss: 1D8 M Cthulhu Mythos: +3/+7 percentiles M Mythos Rating: 30 M Study: 45 weeks " +
+    "M Suggested Spells: Bless Blade, Contact Winged One (Elder Thing); others at the Keeper's discretion. " +
+    "Family History English, by Obed Marsh, 1862 – 1874 Outlines the family history. " +
+    "M Sanity Loss: 1D6 M Cthulhu Mythos: +2/+4 percentiles M Mythos Rating: 18 M Study: 1 week M Suggested Spells: none. " +
+    "GREGOR MENDEL An Augustine friar, and other prose that follows the entries.";
+
+  test("parses inline tomes without an appendix banner", () => {
+    const tomes = parseAppendixTomes(TEXT);
+    assert.deepEqual(
+      tomes.map((t) => t.name),
+      ["Pnakotic Manuscripts", "Family History"],
+    );
+    assert.equal(tomes[0].author, "author and translator unknown");
+    assert.equal(tomes[0].date, "15th century");
+    assert.equal(tomes[0].mythosRating, 30);
+    assert.equal(tomes[0].description, "This bound manuscript is a partial copy of a greater work.");
+    assert.equal(tomes[1].author, "Obed Marsh");
+    assert.equal(tomes[1].date, "1862 – 1874");
+    // The spell list is one sentence; the prose after the last entry stays out.
+    assert.equal(tomes[1].spells, "none.");
+    assert.ok(tomes[0].spells.endsWith("discretion."), tomes[0].spells);
+  });
+
+  test("a section banner glued before a title is dropped", () => {
+    assert.equal(parseAppendixTomes(TEXT)[0].name, "Pnakotic Manuscripts");
+  });
+
+  test("stands down on the bulleted '• Language:' sample-book shape", () => {
+    const ddt =
+      "SAMPLE BOOKS An Account of Travels • Language: Spanish • Sanity Loss: 1D2 • Cthulhu Mythos: 0/1 point • Mythos Rating: 3% • Study: 4 weeks • Spells: none • Skill Points: none. " +
+      "Myths and Legends • Language: Spanish • Sanity Loss: 1D3 • Cthulhu Mythos: 1/2 points • Mythos Rating: 9% • Study: 5 weeks • Spells: none • Skill Points: none.";
+    assert.deepEqual(parseAppendixTomes(ddt), []);
+  });
+});
+
+describe("parseAppendixSpells — titles", () => {
+  test("keeps a 'Call Deity: X or Y' title whole", () => {
+    const spells = parseAppendixSpells(
+      "NEW SPELLS Stopping the chant ends the spell. Call Deity: Father Dagon or Mother Hydra " +
+        "M Cost: 1+ magic point M Casting time: 1–100 minutes Calls the deity to a consecrated stone. " +
+        "Ecstasy* M Cost: 1+ magic points M Casting time: 3 rounds By touching a target the caster induces bliss.",
+    );
+    assert.deepEqual(
+      spells.map((s) => s.name),
+      ["Call Deity: Father Dagon or Mother Hydra", "Ecstasy"],
+    );
+  });
+});
+
 describe("parseAppendixItems", () => {
   test("tags kinds and skips books without appendices", () => {
     assert.deepEqual(parseAppendixItems("no appendices here"), []);

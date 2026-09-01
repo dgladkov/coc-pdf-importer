@@ -707,6 +707,69 @@ describe("parseCocCharacters (unit)", () => {
     assert.deepEqual(names, ["Average Mook", "Jane Doe"]);
   });
 
+  test("a derived-stats line displaced into the skill list is read as derived stats", () => {
+    // Two-column layout: the HP/DB/Build/Move/MP column is emitted after the
+    // description bullets, in the middle of the skills.
+    const [c] = parseCocCharacters(
+      "Victor Obrecht age 45, proprietor STR 50 APP 55 CON 70 POW 60 SIZ 60 EDU 65 DEX 55 SAN 53 INT 65 " +
+        "M Description: overweight and balding. M Traits: sullen and cautious. " +
+        "Skills Appraise 50%, Gambling 60%, Navigate (Innsmouth) HP 13 DB 0 Build 0 Move 6 MP 12 30%, Persuade 45%. " +
+        "Combat Fighting 60% (30/12) damage 1D3 Dodge 27% (13/5)",
+    );
+    assert.equal(c.name, "Victor Obrecht");
+    assert.equal(c.characteristics.HP!.value, 13);
+    assert.deepEqual(c.derived, { DB: "0", Build: 0, Move: 6, MP: 12, Luck: null });
+    assert.equal(c.skills["Navigate (Innsmouth)"], 30);
+    assert.equal(c.skills["Persuade"], 45);
+  });
+
+  test("a sidebar's list label and bullet glyph are not part of a name", () => {
+    const [c] = parseCocCharacters(
+      'Notable Folk M Alice Throckmorton, 60, human, a retired local. M George, deep one, her husband STR 80 CON 60 ' +
+        "SIZ 55 DEX 50 INT 60 APP 40 POW 55 EDU 50 SAN 50 HP 11 DB: +1D4 Build: 1 Move: 6 MP: 11",
+    );
+    assert.equal(c.name, "Alice Throckmorton");
+    assert.equal(c.description, "human, a retired local");
+  });
+
+  test("a comma-less heading's name comes from its own heading run(s), not a sub-heading above", () => {
+    const { text, chunks } = chunked([
+      { t: "Refinery Workers", h: 10, p: 3 },
+      { t: 'Richard "Rich"', h: 16, p: 3 },
+      { t: "Gorton", h: 16, p: 3 },
+      { t: "age 56, hateful father", p: 3 },
+      { t: "STR 65 CON 60 SIZ 70 DEX 50 INT 55 APP 30 POW 50 EDU 40 SAN 45 HP 13 DB +1D4 Build 1 Move 7 MP 10 Combat Brawl 50% (25/10), damage 1D3", p: 3 },
+      { t: "Jane Doe, 30, clerk", h: 11, p: 5 },
+      { t: STATS + " Combat Brawl 40% (20/8), damage 1D3", p: 5 },
+    ]);
+    const [c] = parseCocCharacters(text, chunks);
+    assert.equal(c.name, 'Richard "Rich" Gorton');
+    assert.equal(c.age, 56);
+    assert.equal(c.description, "hateful father");
+  });
+
+  test("headerless stat lines under one section title are numbered as its members", () => {
+    const line = (s: string) => ({ t: s, p: 4 });
+    const { text, chunks } = chunked([
+      { t: "Jane Doe, 30, clerk", h: 11, p: 2 },
+      { t: STATS + " Combat Brawl 40% (20/8), damage 1D3", p: 2 },
+      { t: "Profiles: Innsmouth Humans", h: 16, p: 4 },
+      line("STR 50 APP 50 CON 50 POW 60 SIZ 45 EDU 45 DEX 70 SAN 60 INT 70 HP 11 DB 0 Build 0 Move 8 MP 12"),
+      line("STR 40 APP 50 CON 55 POW 75 SIZ 55 EDU 85 DEX 55 SAN 75 INT 80 HP 11 DB 0 Build 0 Move 8 MP 15"),
+      line("STR 40 APP 55 CON 60 POW 50 SIZ 55 EDU 55 DEX 55 SAN 50 INT 65 HP 15 DB +1D4 Build 1 Move 7 MP 10"),
+      { t: "Bob Roe, 40, farmer", h: 11, p: 7 },
+      { t: STATS + " Combat Brawl 30% (15/6), damage 1D3", p: 7 },
+    ]);
+    const names = parseCocCharacters(text, chunks).map((c) => c.name);
+    assert.deepEqual(names, [
+      "Jane Doe",
+      "Innsmouth Humans 1",
+      "Innsmouth Humans 2",
+      "Innsmouth Humans 3",
+      "Bob Roe",
+    ]);
+  });
+
   test("the generic NPC member-name fallback keeps its acronym", () => {
     // A group table with numeric column labels and no recoverable title.
     const chars = parseCocCharacters(

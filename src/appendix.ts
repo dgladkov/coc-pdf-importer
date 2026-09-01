@@ -99,7 +99,22 @@ function normalizeAppendixBullets(s: string): string {
     .replace(/\bM\s+(Cthulhu Mythos:)/g, "• $1")
     .replace(/\bM\s+(Mythos Rating:)/g, "• $1")
     .replace(/\bM\s+(Study:)/g, "• $1")
-    .replace(/\bM\s+(Spells:)/g, "• $1");
+    .replace(/\bM\s+(Spells:)/g, "• $1")
+    // Innsmouth's tomes list "Suggested Spells:" where the appendices say
+    // "Spells:", and date a work "15 th century" (superscript ordinal as its
+    // own token) with no closing period before the description runs on.
+    .replace(/\bM\s+Suggested Spells:/g, "• Spells:")
+    .replace(
+      /\b(\d{1,2})\s?(st|nd|rd|th)?\s+century(?=\s+(?!BCE\b|CE\b|AD\b)[A-Z])/g,
+      (_m, n: string, s: string | undefined) => `${n}${s ?? "th"} century.`,
+    )
+    // Likewise a "…, by Obed Marsh, 1862 – 1874 Outlines the…" line whose year
+    // runs straight into the description: close it with the period the
+    // appendix shape has.
+    .replace(
+      /(\b(?:by\s+[A-Z][^•]{2,80}?|author(?:\s+and\s+translator)?\s+unknown),\s*(?:c\.\s*)?\d{3,4}(?:\s*[–-]\s*\d{3,4})?)(?=\s+(?!BCE\b|CE\b|AD\b)[A-Z])/g,
+      "$1.",
+    );
 }
 
 function cleanSpaces(s: string): string {
@@ -256,9 +271,26 @@ function sliceAppendix(
     return raw.slice(spellsStart, end > 0 ? end : raw.length);
   }
   if (letter === "C") {
-    if (tomesStart < 0) return "";
     const end = nextBound(tomesStart, artefactsStart, spellsStart);
-    return raw.slice(tomesStart, end > 0 ? end : raw.length);
+    const section =
+      tomesStart < 0 ? "" : raw.slice(tomesStart, end > 0 ? end : raw.length);
+    if (/•\s*Sanity Loss:/.test(section)) return section;
+    // No tomes appendix (or only a banner without stat blocks — Innsmouth's
+    // "The Deep Ones in Tomes" is a fiction bibliography) — but a book may
+    // print appendix-shaped tome entries inline in its chapters (Innsmouth's
+    // "Ephraim's Mythos Books": title, "Language, author, date." line,
+    // description, stats). Parse the whole text when at least two such entries
+    // are present. Stat bullets alone are not enough: Down Darker Trails'
+    // sample books use a different "• Language: … • Skill Points:" shape that
+    // needs its own parser — those bullets mark that shape, so stand down.
+    if ((raw.match(/•\s*Language:/g) || []).length >= 2) return "";
+    let inline = 0;
+    const re = /•\s*Sanity Loss:/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(raw))) {
+      if (lastTomeMeta(raw.slice(Math.max(0, m.index - 2500), m.index))) inline++;
+    }
+    return inline >= 2 ? raw : "";
   }
   if (letter === "D") {
     if (artefactsStart < 0) return "";
@@ -341,8 +373,10 @@ function normalizeDice(s: string): string {
 // A title word may carry a French elision ("d\u2019Ivon", "l\u2019\u00c9toile") and must start
 // at a word boundary \u2014 the "Ivon" inside "d\u2019Ivon" is not a title on its own.
 const TITLE_WORD = String.raw`(?:[dl][\u2019'])?[A-Z\u00c0-\u00dd][A-Za-z\u00c0-\u00ff\u2019'/.-]+`;
+// A word inside the run may end with ":" ("Call Deity: Father Dagon or Mother
+// Hydra"), and "or" joins alternatives.
 const TITLE_AT_END = new RegExp(
-  String.raw`(?<![A-Za-z\u00c0-\u00ff\u2019'])((?:${TITLE_WORD}(?:\s+(?:of|the|a|an|to|and|from|for|with|in|As|A|de|du|des|la|le|${TITLE_WORD}))+|${TITLE_WORD})(?:\s*\([^)]+\))?)\s*$`,
+  String.raw`(?<![A-Za-z\u00c0-\u00ff\u2019'])((?:${TITLE_WORD}:?(?:\s+(?:of|the|a|an|to|and|or|from|for|with|in|As|A|de|du|des|la|le|${TITLE_WORD}:?))+|${TITLE_WORD})(?:\s*\([^)]+\))?)\s*$`,
 );
 
 const BAD_SPELL_TITLES =
@@ -503,9 +537,18 @@ export function parseStudyUnits(unit: string): string {
 // The language may carry a qualifier before the comma — "hieroglyphs", or a
 // short phrase ("French commentary on Latin original by Gaspar du Nord,") — and
 // an "Original"/"Classical" prefix. A date may be a decade ("1920s").
-const TOME_LANG_HEAD = String.raw`\b(?:Original\s+)?(?:Classical\s+)?(${TOME_LANG})(?:\s+(?:hieroglyphs|script|language))?(?:\s+[^,•.]{1,60}?)?,`;
+const TOME_LANG_HEAD = String.raw`\b(?:Handwritten\s+(?:manuscript\s+in\s+)?)?(?:Original\s+)?(?:Classical\s+)?(${TOME_LANG})(?:\s+(?:hieroglyphs|script|language))?(?:\s+[^,•.]{1,60}?)?,`;
+// The bibliographic line ends with a period, or runs straight into the stat
+// bullets ("…, by Prosper Harmon, 1841–1843 • Sanity Loss:"). (Innsmouth's
+// "15 th century This bound manuscript" — no period — is normalised to a
+// period in normalizeAppendixBullets rather than loosened here: a capital-
+// letter lookahead let the meta pattern fire inside prose and cost other
+// books real tomes.)
+// The text handed to the matcher ends where the entry's stat bullets begin, so
+// a line that runs into them ends the string.
+const META_END = String.raw`\)?(?:\.|(?=\s*•)|\s*$)`;
 const TOME_META = new RegExp(
-  String.raw`${TOME_LANG_HEAD}\s*(?:(?:(?:translated|written)\s+)?by\s+|author(?:\s*\/\s*translation|\s+and\s+translator)?[^,]*,\s*)?[^•]{0,200}?(?:(?:c\.\s*)?\d{3,4}s?(?:\s*[–-]\s*\d{3,4})?|(?:\d{1,2}(?:st|nd|rd|th)\s+)?century|Dynasty[^•]{0,60}?BCE|BCE|CE|date unknown)\)?\.`,
+  String.raw`${TOME_LANG_HEAD}\s*(?:(?:(?:translated|written)\s+)?by\s+|author(?:\s*\/\s*translation|\s+and\s+translator)?[^,]*,\s*)?[^•]{0,200}?(?:(?:c\.\s*)?\d{3,4}s?(?:\s*[–-]\s*\d{3,4})?|(?:\d{1,2}(?:st|nd|rd|th)\s+)?century|Dynasty[^•]{0,60}?BCE|BCE|CE|date unknown)${META_END}`,
   "gi",
 );
 
@@ -517,7 +560,7 @@ function parseTomeMetadata(meta: string): {
 } {
   const m = meta.match(
     new RegExp(
-      String.raw`^${TOME_LANG_HEAD.slice(2)}\s*(?:(?:(?:translated|written)\s+)?by\s+|(author(?:\s*\/\s*translation|\s+and\s+translator)?[^,]*),\s*)?(.+?),\s*((?:c\.\s*)?\d{3,4}s?|(?:[^.]{0,40}?century)|(?:c\.\s*)?[^.]{0,80}?(?:Dynasty|BCE|CE|date unknown)[^)]{0,20}?)\)?\.(.*)$`,
+      String.raw`^${TOME_LANG_HEAD.slice(2)}\s*(?:(?:(?:translated|written)\s+)?by\s+|(author(?:\s*\/\s*translation|\s+and\s+translator)?[^,]*),\s*)?(.+?),\s*((?:c\.\s*)?\d{3,4}s?(?:\s*[–-]\s*\d{3,4})?|(?:[^.]{0,40}?century)|(?:c\.\s*)?[^.]{0,80}?(?:Dynasty|BCE|CE|date unknown)[^)]{0,20}?)${META_END}(.*)$`,
       "i",
     ),
   );
@@ -562,8 +605,35 @@ function regionBefore(text: string, at: number): string {
 }
 
 /** Clean title run immediately before a bibliographic language line. */
+// An ALL-CAPS section banner glued before a mixed-case title ("EPHRAIM'S
+// MYTHOS BOOKS Pnakotic Manuscripts") is not part of it; an all-caps title on
+// its own (2HS) is left alone.
+const CAPS_BANNER = /^(?:[A-Z][A-Z’']+\s+){2,}(?=[A-Z][a-z])/;
+
 function cleanTomeTitle(raw: string): string {
   let s = cleanSpaces(raw);
+  // What follows the last sentence end is the title when it is short — taken
+  // whole, so a foreign-language title keeps its lowercase words ("Das Land und
+  // die Geister vergangener Zeiten") and an ampersand ("Obed Marsh's Ships'
+  // Logs & Journals") survives.
+  const lastStop = s.lastIndexOf(". ");
+  {
+    const rem = cleanSpaces(
+      (lastStop >= 0 ? s.slice(lastStop + 2) : s)
+        .replace(/^.*\bnone\s+/i, "")
+        .replace(new RegExp(String.raw`^.*\b(?:${REGION_NAMES})\s+`, "i"), "")
+        .replace(CAPS_BANNER, ""),
+    );
+    if (
+      rem &&
+      /^[A-ZÀ-Ý]/.test(rem) &&
+      rem.split(/\s+/).length <= 8 &&
+      !/[•:]/.test(rem)
+    ) {
+      const the = rem.search(/\sThe\s/);
+      return the >= 0 ? rem.slice(the + 1) : rem;
+    }
+  }
   s = s.replace(/^.*\bnone\s+/i, "");
   s = s.replace(/^.*\)\s+/, "");
   // Drop region banner — title follows it.
@@ -577,7 +647,8 @@ function cleanTomeTitle(raw: string): string {
   // capitalised "The" inside the run starts the real title.
   const tm = s.match(TITLE_AT_END);
   if (tm) {
-    const run = cleanSpaces(tm[1]);
+    let run = cleanSpaces(tm[1]);
+    run = run.replace(CAPS_BANNER, "");
     const the = run.search(/\sThe\s/);
     return the >= 0 ? run.slice(the + 1) : run;
   }
@@ -670,7 +741,7 @@ function splitTomePreamble(before: string): {
     date,
     physical,
     link,
-    description: rest,
+    description: cleanSpaces(rest),
     relevance,
     region,
   };
@@ -845,7 +916,13 @@ export function parseAppendixTomes(text: string): AppendixTome[] {
       i + 1 < anchors.length
         ? findNextTomeTitleIndex(section, a.spellsStart, anchors[i + 1].index)
         : section.length;
-    const spells = cleanSpaces(section.slice(a.spellsStart, spellsEnd));
+    // The spell list is one sentence; when no next title bounds it (the last
+    // entry, or one followed by prose) it must not run on into the rest of the
+    // book.
+    let spells = cleanSpaces(section.slice(a.spellsStart, spellsEnd));
+    const stop = spells.search(/\.(?:\s|$)/);
+    if (stop >= 0) spells = spells.slice(0, stop + 1);
+    if (spells.length > 800) spells = spells.slice(0, 800);
     const parsed = splitTomePreamble(before);
     let name = parsed.name;
     if (!name) {

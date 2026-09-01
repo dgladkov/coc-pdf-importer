@@ -197,7 +197,15 @@ export function parseCocCharacters(
           bodyHeight,
           nameHeight,
         )) ||
-      parseHeader(text, strIndex, winStart, leftBound, NAME_LOOKBACK);
+      parseHeader(
+        text,
+        strIndex,
+        winStart,
+        leftBound,
+        NAME_LOOKBACK,
+        chunks,
+        bodyHeight,
+      );
     // A last-resort section title for group tables whose heading is too tall /
     // too far for the paths above (used only when no group name is found), plus
     // the offset where that title begins (to bound the previous block's body).
@@ -285,6 +293,8 @@ export function parseCocCharacters(
   });
 
   const characters: CocCharacter[] = [];
+  let profileRun: { base: string; first: CocCharacter; count: number } | null =
+    null;
 
   blocks.forEach((block, i) => {
     const { name, age, description } = headers[i].header;
@@ -313,19 +323,39 @@ export function parseCocCharacters(
       // printed after the last form, so inherit them from that block's body.
       sharedTail = blocks[i + 1].body;
     }
-    characters.push(
-      ...parseBlock(
-        block.body,
-        headers[i].window,
-        name,
-        age,
-        description,
-        headers[i].sectionHeading,
-        block.preTable,
-        sharedTail,
-        blockForm(name, block.body),
-      ),
+      const parsed = parseBlock(
+      block.body,
+      headers[i].window,
+      name,
+      age,
+      description,
+      headers[i].sectionHeading,
+      block.preTable,
+      sharedTail,
+      blockForm(name, block.body),
     );
+    // A run of headerless stat lines under one section title ("Profiles:
+    // Innsmouth Humans" — a grid of generic profiles) are that group's members.
+    // The first is named from the title (whether the title was too tall for the
+    // name path and came in as the section heading, or was read as the name
+    // itself); the following ones, which have no heading of their own, continue
+    // it as "<title> 2", "<title> 3", …
+    const titled = !name || name === clean(headers[i].sectionHeading);
+    if (parsed.length === 1 && titled) {
+      if (headers[i].sectionHeading && parsed[0].name !== "Unknown") {
+        profileRun = { base: parsed[0].name, first: parsed[0], count: 1 };
+      } else if (profileRun && parsed[0].name === "Unknown") {
+        profileRun.count++;
+        if (profileRun.count === 2)
+          profileRun.first.name = `${profileRun.base} 1`;
+        parsed[0].name = `${profileRun.base} ${profileRun.count}`;
+      } else {
+        profileRun = null;
+      }
+    } else {
+      profileRun = null;
+    }
+    characters.push(...parsed);
   });
 
   return characters
@@ -354,6 +384,12 @@ function cleanActorName(name: string): string {
   // A footnote marker tacked onto a heading ("CATTLE *") carries no meaning
   // once detached from its footnote text.
   cleaned = cleaned.replace(/[*†‡]+/g, "");
+  // A sidebar's list label and bullet glyph (Innsmouth maps its bullet to a
+  // lone "M": "Notable Folk M Alice Throckmorton"), and a "Profiles:" table
+  // label ("Profiles: Innsmouth Humans"), are not part of the name.
+  cleaned = cleaned
+    .replace(/^(?:Notable Folk\s+)?M\s+(?=[A-Z"'])/, "")
+    .replace(/^Profiles?:\s*/i, "");
   cleaned = stripUnpairedQuote(cleaned);
   cleaned = clean(cleaned);
   // Some books print every stat-block name in ALL CAPS ("BILLY THE KID");
@@ -652,6 +688,8 @@ function parseHeader(
   winStart: number,
   leftBound: number,
   nameLookback: number,
+  chunks?: TextChunk[],
+  bodyHeight = 0,
 ): ParsedHeader {
   const window = text.slice(winStart, strIndex);
 
@@ -707,9 +745,33 @@ function parseHeader(
     (!best || (bare.index ?? 0) >= (best.index ?? 0) + best[0].length)
   ) {
     const ageAbs = winStart + (bare.index ?? 0);
-    const name = extractName(
-      text.slice(Math.max(leftBound, ageAbs - nameLookback), ageAbs),
-    );
+    // The heading is set as its own run(s) — "Robert Ballant" / "age 28, night
+    // watchman" — so the name is the run holding "age" (or the run before it,
+    // when "age" opens its run), not a fixed lookback that can reach a
+    // sub-heading printed above ("Refinery Workers").
+    // A long name wraps onto two heading lines ('Richard "Rich"' / 'Gorton'),
+    // so the heading is the whole run of consecutive same-height, non-body
+    // runs ending there.
+    let from = Math.max(leftBound, ageAbs - nameLookback);
+    if (chunks) {
+      const k = chunks.findIndex((c) => c.start <= ageAbs && ageAbs < c.end);
+      if (k >= 0) {
+        const opensRun = ageAbs - chunks[k].start < 2;
+        let h = opensRun ? k - 1 : k;
+        if (h >= 0) {
+          const height = chunks[h].height;
+          while (
+            h > 0 &&
+            height !== bodyHeight &&
+            chunks[h - 1].height === height &&
+            chunks[h - 1].start >= leftBound
+          )
+            h--;
+          from = Math.max(from, chunks[h].start);
+        }
+      }
+    }
+    const name = extractName(text.slice(from, ageAbs));
     if (name) {
       return {
         name,
@@ -875,7 +937,10 @@ function trimDescription(raw: string): string {
   let desc = clean(
     clean(raw)
       .replace(STAT_TABLE_COLUMN_HEADER, "")
-      .replace(/\s*\bArchetype:\s.*$/i, ""),
+      .replace(/\s*\bArchetype:\s.*$/i, "")
+      // A sidebar's next bullet (Innsmouth's "M" glyph: "… local. M George,
+      // deep one, …") is not part of this entry's descriptor.
+      .replace(/[.;]?\s+M\s+(?=[A-Z"'])[\s\S]*$/, ""),
   );
   if (desc.length <= DESCRIPTION_MAX) return desc;
   const cut = desc.lastIndexOf(" ", DESCRIPTION_MAX);
@@ -989,7 +1054,11 @@ function collectName(pre: string, allowCaps: boolean): string {
     collected.unshift(token);
   }
 
-  return clean(collected.join(" ")).replace(/^Name\s*:?\s*/i, "");
+  // A leading "and"/"or" is a list connector, never part of the name
+  // ("Nathan Birch and Elliot Ropes" -> "Elliot Ropes" for the second block).
+  return clean(collected.join(" "))
+    .replace(/^Name\s*:?\s*/i, "")
+    .replace(/^(?:and|or)\s+/i, "");
 }
 
 function isNameToken(token: string, allowCaps: boolean): boolean {
@@ -1032,6 +1101,7 @@ function parseBlock(
   // offsets used for name detection stay stable).
   body = normalizeLabels(body);
   body = expandLanguageList(body);
+  body = relocateDerivedLine(body);
 
   // Drop a name recovered from an "average / rolls" column-header row.
   if (isFurnitureName(name)) name = "";
@@ -1187,6 +1257,30 @@ function parseBlock(
     });
   }
   return out;
+}
+
+// Two-column stat layouts (Innsmouth) set the "HP 13 DB +1D4 Build 1 Move 7
+// MP 12" line in a second column, which pdf.js emits later — inside the skill
+// list ("Navigate (Innsmouth) HP 13 … MP 12 30%") or after the description
+// bullets. When the stat header carries no HP, move that line up into the
+// header so it is read as the derived stats and stops corrupting a skill.
+const DERIVED_LINE =
+  /\bHP\s+\d{1,3}\s+DB\s+(?:[+-]?\d*[dD]\d+(?:[+-]\d+)?|[+-]?\d+|-)\s+Build\s+-?\d+\s+Move\s+\d+\s+MP\s+\d+\b/;
+function relocateDerivedLine(body: string): string {
+  const headerEnd = statHeaderEnd(body);
+  const header = body.slice(0, headerEnd);
+  if (/\bHP\b/.test(header)) return body;
+  const rest = body.slice(headerEnd);
+  const m = DERIVED_LINE.exec(rest);
+  if (!m) return body;
+  return (
+    header +
+    " " +
+    m[0] +
+    " " +
+    rest.slice(0, m.index) +
+    rest.slice(m.index + m[0].length)
+  );
 }
 
 function statHeaderEnd(body: string): number {
