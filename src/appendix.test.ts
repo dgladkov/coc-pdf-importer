@@ -101,6 +101,35 @@ TOMES
     assert.match(spells[1].description, /short-lived barrier/);
   });
 
+  test("a Note paragraph before a title stays with the previous spell", () => {
+    const spells = parseAppendixSpells(`
+APPENDIX B
+SPELLS
+Alpha Bolt (Folk)
+ • Cost: 4 magic points; 1D2 Sanity points
+ • Casting time: 1 round
+Fires a glowing bolt that deals harm to one target.
+Note: a copy of this spell can be found in the Blue Codex.
+Gamma Eye
+ • Cost: variable POW (100 standard)
+ • Casting time: dusk till dawn
+A powerful ward against many agents.
+APPENDIX C
+TOMES
+`);
+    assert.deepEqual(
+      spells.map((s) => s.name),
+      ["Alpha Bolt (Folk)", "Gamma Eye"],
+    );
+    assert.match(
+      spells[0].description,
+      /Note: a copy of this spell.*Blue Codex\.$/,
+    );
+    assert.equal(spells[1].note, "");
+    assert.equal(spells[1].castingTime, "dusk till dawn");
+    assert.match(spells[1].description, /^A powerful ward/);
+  });
+
   test("returns empty when no appendix B", () => {
     assert.deepEqual(parseAppendixSpells("just some travel text"), []);
   });
@@ -208,6 +237,42 @@ ARTIFACTS
     assert.match(t.spells, /Alpha Bolt/);
     assert.equal(tomes[1].name, "Blue Codex");
     assert.equal(tomes[1].spells, "none");
+  });
+
+  test("an undated 'of ancient origin' line and a trailing 'translator unknown' are bibliographic lines", () => {
+    const tomes = parseAppendixTomes(`
+APPENDIX C
+TOMES
+Old Codex
+English, author/translation unknown, reputedly of ancient origin. Quarto, bound in goatskin.
+ • Link: Vault, page 3.
+Alleged to be very old.
+ • Sanity Loss: 1D4
+ • Cthulhu Mythos: +1/+2 percentiles
+ • Mythos Rating: 5
+ • Study: 3 weeks
+ • Spells: none
+Dark Ledger
+Hindi, by Some Author, 1517, translator unknown. Duodecimo, bound in black calfskin.
+ • Link: Cellar, page 4.
+A translation of confessions.
+ • Sanity Loss: 1D6
+ • Cthulhu Mythos: +2/+4 percentiles
+ • Mythos Rating: 12
+ • Study: 8 weeks
+ • Spells: none
+APPENDIX D
+ARTIFACTS
+`);
+    assert.deepEqual(
+      tomes.map((t) => t.name),
+      ["Old Codex", "Dark Ledger"],
+    );
+    assert.equal(tomes[0].date, "reputedly of ancient origin");
+    assert.match(tomes[0].physical, /^Quarto/);
+    assert.equal(tomes[1].author, "Some Author");
+    assert.equal(tomes[1].date, "1517");
+    assert.match(tomes[1].physical, /^Duodecimo/);
   });
 
   test("keeps title after Spells: none and Spanish written-by metadata", () => {

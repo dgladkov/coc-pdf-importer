@@ -472,13 +472,26 @@ export function parseAppendixSpells(text: string): AppendixSpell[] {
     /(?:(?<![Kk]eeper\s)Note:\s*([^•]+?)\s+)?•\s*Cost:\s*([^•]+?)\s+•\s*Casting time:\s*/gi;
   let cm: RegExpExecArray | null;
   while ((cm = costFind.exec(section))) {
+    // A "Note:" paragraph that closes the previous spell's write-up ("Note: a
+    // copy of this spell can be found in …. Eye of Light and Darkness • Cost:")
+    // is not this spell's note: its trailing sentence is this spell's title,
+    // and the note stays with the previous spell's text. Anchor at the Cost
+    // bullet instead, so the title is read from the text before it.
+    let index = cm.index;
+    let note = cm[1] ?? "";
+    const trailing = cleanSpaces(note).match(/\.\s+([^.]+)$/);
+    const title = trailing && trailing[1].match(TITLE_AT_END);
+    if (trailing && title && !/\.$/.test(title[1])) {
+      index = cm.index + cm[0].search(/\s*•\s*Cost:/);
+      note = "";
+    }
     const castingStart = cm.index + cm[0].length;
     const { castingTime, length } = parseCastingTime(
       section.slice(castingStart),
     );
     anchors.push({
-      index: cm.index,
-      note: cleanSpaces(cm[1] ?? ""),
+      index,
+      note: cleanSpaces(note),
       cost: cleanSpaces(cm[2] ?? ""),
       castingTime,
       afterCast: castingStart + length,
@@ -572,7 +585,7 @@ const TOME_LANG_HEAD = String.raw`\b(?:Handwritten\s+(?:manuscript\s+in\s+)?)?(?
 // a line that runs into them ends the string.
 const META_END = String.raw`\)?(?:\.|(?=\s*•)|\s*$)`;
 const TOME_META = new RegExp(
-  String.raw`${TOME_LANG_HEAD}\s*(?:(?:(?:translated|written)\s+)?by\s+|author(?:\s*\/\s*translation|\s+and\s+translator)?[^,]*,\s*)?[^•]{0,200}?(?:(?:c\.\s*)?\d{3,4}s?(?:\s*[–-]\s*\d{3,4})?|(?:\d{1,2}(?:st|nd|rd|th)\s+)?century|Dynasty[^•]{0,60}?BCE|BCE|CE|date unknown)${META_END}`,
+  String.raw`${TOME_LANG_HEAD}\s*(?:(?:(?:translated|written)\s+)?by\s+|author(?:\s*\/\s*translation|\s+and\s+translator)?[^,]*,\s*)?[^•]{0,200}?(?:(?:c\.\s*)?\d{3,4}s?(?:\s*[–-]\s*\d{3,4})?|(?:\d{1,2}(?:st|nd|rd|th)\s+)?century|Dynasty[^•]{0,60}?BCE|BCE|CE|date unknown|of ancient origin)(?:,\s*translat(?:or|ion)[^•.]{0,40})?${META_END}`,
   "gi",
 );
 
@@ -584,7 +597,7 @@ function parseTomeMetadata(meta: string): {
 } {
   const m = meta.match(
     new RegExp(
-      String.raw`^${TOME_LANG_HEAD.slice(2)}\s*(?:(?:(?:translated|written)\s+)?by\s+|(author(?:\s*\/\s*translation|\s+and\s+translator)?[^,]*),\s*)?(.+?),\s*((?:c\.\s*)?\d{3,4}s?(?:\s*[–-]\s*\d{3,4})?|(?:[^.]{0,40}?century)|(?:c\.\s*)?[^.]{0,80}?(?:Dynasty|BCE|CE|date unknown)[^)]{0,20}?)${META_END}(.*)$`,
+      String.raw`^${TOME_LANG_HEAD.slice(2)}\s*(?:(?:(?:translated|written)\s+)?by\s+|(author(?:\s*\/\s*translation|\s+and\s+translator)?[^,]*),\s*)?(.+?),\s*((?:c\.\s*)?\d{3,4}s?(?:\s*[–-]\s*\d{3,4})?|(?:[^.]{0,40}?century)|(?:c\.\s*)?[^.]{0,80}?(?:Dynasty|BCE|CE|date unknown|of ancient origin)[^)]{0,20}?)(?:,\s*translat(?:or|ion)[^•.]{0,40})?${META_END}(.*)$`,
       "i",
     ),
   );

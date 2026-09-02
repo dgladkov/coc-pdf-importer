@@ -174,7 +174,7 @@ export function parseCocCharacters(
   // Classic Chaosium order is STR … CON directly. Modern two-column sheets
   // (Innsmouth et al.) flatten as STR val APP val CON val POW … — so other
   // characteristic labels may sit between STR's value(s) and CON.
-  const value = String.raw`(?:\d{1,3}\*?|-|\?|[Nn]/[Aa])(?:\s*\([^)]*\))?(?:\s*[×xX]\s*\d+)?`;
+  const value = String.raw`(?:\d{1,3}\*?|-|\?|[Nn]/[Aa])(?:\s*\([^)]*\)|\s+\d*[dD]\d+(?:[+-]\d+)?(?=\s*[×xX]\s*\d+))?(?:\s*[×xX]\s*\d+)?`;
   const midLabel = String.raw`(?:APP|POW|SIZ|EDU|DEX|SAN|INT|HP|DB|Build|Move|MP|Luck)`;
   const afterStr = String.raw`(?:${value}|${midLabel}\s+${value})`;
   const anchorRe = new RegExp(
@@ -510,6 +510,9 @@ function cleanActorName(name: string): string {
     .replace(/^(?:Notable Folk\s+)?M\s+(?=[A-Z"'])/, "")
     .replace(/^Profiles?:\s*/i, "");
   cleaned = stripUnpairedQuote(cleaned);
+  // A possessive set as its own run leaves a space before it ("Bill Buckley
+  // 's Ghost", "M'Weru 's Bodyguards").
+  cleaned = cleaned.replace(/\s+(['’]s)\b/g, "$1");
   cleaned = clean(cleaned);
   // Some books print every stat-block name in ALL CAPS ("BILLY THE KID");
   // proper-case those so they read naturally. A name already in mixed case
@@ -728,13 +731,15 @@ function sectionHeadingFromChunks(
     // ("The Chakota's Dark Spirit") set at the same height is not part of it.
     // A margin tag there that repeats the name ("Charlie Johnson" before the
     // page's "Charlie Johnson, age 39, …") is kept, so the run — and the
-    // previous block's body — still ends before it.
+    // previous block's body — still ends before it. An italic part of the
+    // title is set a fraction larger ("EGYPTIAN COBRA (" at 17, "NAJA HAJE" at
+    // 17.3), so heights within half a point are one run.
     const page = chunks[i].page;
     const alpha = (t: string) => t.toLowerCase().replace(/[^a-z]/g, "");
     for (
       ;
       j >= 0 &&
-      chunks[j].height === height &&
+      Math.abs(chunks[j].height - height) <= 0.5 &&
       chunks[j].start >= leftBound &&
       (chunks[j].page === page ||
         (alpha(chunks[j].text).length > 0 &&
@@ -747,8 +752,11 @@ function sectionHeadingFromChunks(
     const text = clean(parts.join(" "));
     // A monster stat table prints an intermediate-sized "char. / average / roll"
     // header row above its values; that is not the creature's title, so keep
-    // walking back (past the description) to the real heading above it.
-    if (!isFurnitureName(text)) return { text, start };
+    // walking back (past the description) to the real heading above it. Nor is
+    // a run without a letter — a ")" set in its own size at the end of a title
+    // ("EGYPTIAN COBRA (NAJA HAJE )").
+    if (/[A-Za-zÀ-ɏ]/.test(text) && !isFurnitureName(text))
+      return { text, start };
     i = j;
   }
   return none;
@@ -1159,6 +1167,10 @@ function collectName(pre: string, allowCaps: boolean): string {
   // its letter/number must not survive as a stray token ("D Christine Mei").
   const tokens = pre
     .replace(/\b(?:APPENDIX|CHAPTER)\s+[A-Z0-9]{1,2}\b/g, " ")
+    // A parenthetical set with inner spaces ("EGYPTIAN COBRA (  NAJA HAJE )")
+    // would leave its ")" as a lone token; tighten it to one "(NAJA HAJE)".
+    .replace(/\(\s+/g, "(")
+    .replace(/\s+\)/g, ")")
     .trim()
     .split(/\s+/)
     .filter(Boolean);

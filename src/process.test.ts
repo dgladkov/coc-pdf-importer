@@ -737,6 +737,31 @@ describe("parseCocCharacters (unit)", () => {
   const STATS =
     "STR 50 CON 50 SIZ 50 DEX 50 INT 50 APP 50 POW 50 EDU 50 SAN 50 HP 10 DB: 0 Build: 0 Move: 8 MP: 10";
 
+  test("a mixed-size title with a lone ')' run names a creature ('EGYPTIAN COBRA ( NAJA HAJE )')", () => {
+    const { text, chunks } = chunked([
+      { t: "Jane Doe, 30, clerk", h: 11 },
+      { t: STATS + " Combat Brawl 40% (20/8), damage 1D3 Skills Charm 40%." },
+      {
+        t: "The previous artifact's write-up ends here with a plain sentence.",
+      },
+      { t: "EGYPTIAN COBRA (", h: 17 },
+      { t: "NAJA HAJE", h: 17.3 },
+      { t: ")", h: 17 },
+      { t: "A smaller, less beautiful serpent than the king cobra of India." },
+      {
+        t:
+          "char. average rolls STR 10 1D3 ×5 CON 30 (1D6+3) ×5 SIZ 5 (1D2) ×5 POW 15 (1D6) ×5 DEX 65 (2D6+6) ×5 " +
+          "Hit Points: 3 Average Damage Bonus: –2 Average Build: –2 Move: 8 Combat Attacks per round: 1 " +
+          "Bite 40% (20/8), damage 1D3 Dodge 30% (15/6) Skills Stealth 90%.",
+      },
+    ]);
+    const cs = parseCocCharacters(text, chunks);
+    assert.deepEqual(
+      cs.map((c) => c.name),
+      ["Jane Doe", "Egyptian Cobra (Naja Haje)"],
+    );
+  });
+
   test("a block's body never runs past the page after its STR line", () => {
     const { text, chunks } = chunked([
       { t: "Jane Doe, 30, clerk", h: 11, p: 2 },
@@ -1257,6 +1282,31 @@ describe("parseCocCharacters (unit)", () => {
       cs.map((c) => c.name),
       ["Ssathasaa", "Ssathasaa (as Bertha Shipley)"],
     );
+  });
+
+  test("a possessive set as its own run is rejoined to the name", () => {
+    const [c] = parseCocCharacters(
+      "Bill Buckley 's Ghost, vengeful spirit " +
+        STATS +
+        " Combat Brawl 40% (20/8), damage 1D3",
+    );
+    assert.equal(c.name, "Bill Buckley's Ghost");
+  });
+
+  test("an average/rolls block with a bare dice formula ('10 1D3 ×5') is a stat block", () => {
+    const [c] = parseCocCharacters(
+      "Egyptian Cobra, deadly serpent char. average rolls STR 10 1D3 ×5 CON 30 (1D6+3) ×5 SIZ 5 (1D2) ×5 " +
+        "POW 15 (1D6) ×5 DEX 65 (2D6+6) ×5 Hit Points: 3 Average Damage Bonus: –2 Average Build: –2 Move: 8 " +
+        "Combat Attacks per round: 1 Bite 40% (20/8), damage 1D3+DB+1D10 poison Dodge 30% (15/6) Skills Stealth 90%. Armor: none.",
+    );
+    assert.equal(c.characteristics.STR!.value, 10);
+    assert.equal(c.characteristics.CON!.value, 30);
+    assert.equal(c.characteristics.DEX!.value, 65);
+    assert.deepEqual(
+      c.combat.map((a) => a.name),
+      ["Bite", "Dodge"],
+    );
+    assert.equal(c.skills["Stealth"], 90);
   });
 
   test("the generic NPC member-name fallback keeps its acronym", () => {
