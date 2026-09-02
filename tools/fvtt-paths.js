@@ -1,6 +1,6 @@
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const toolsDir = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.dirname(toolsDir);
@@ -8,7 +8,7 @@ export const REPO_ROOT = path.dirname(toolsDir);
 /** Absolute Foundry user data root (folder that contains `Data/`). */
 export function resolveUserDataPath(developmentOptions) {
   const raw = developmentOptions?.userDataPath;
-  if (!raw || typeof raw !== 'string' || !String(raw).trim()) {
+  if (!raw || typeof raw !== "string" || !String(raw).trim()) {
     return null;
   }
   const trimmed = String(raw).trim();
@@ -22,7 +22,7 @@ export function moduleOutputDir(developmentOptions, moduleId) {
   if (!userData || !moduleId) {
     return null;
   }
-  return path.join(userData, 'Data', 'modules', moduleId);
+  return path.join(userData, "Data", "modules", moduleId);
 }
 
 /** Create `Data/modules/<id>` under userDataPath; return absolute path. */

@@ -4,22 +4,22 @@
 //                         the pdf.js worker, lang/ and templates/)
 //   build/module.json   — the manifest, served alongside the zip so Foundry's
 //                         release manifest URL can point at it
-import fs from 'node:fs';
-import path from 'node:path';
-import { execFileSync, spawnSync } from 'node:child_process';
-import * as esbuild from 'esbuild';
-import { copyPdfWorker } from './copy-worker.js';
-import { bundleConfig } from './esbuild-config.js';
+import fs from "node:fs";
+import path from "node:path";
+import { execFileSync, spawnSync } from "node:child_process";
+import * as esbuild from "esbuild";
+import { copyPdfWorker } from "./copy-worker.js";
+import { bundleConfig } from "./esbuild-config.js";
 
-const BUILD = 'build';
-const STAGE = path.join(BUILD, 'staging'); // module contents, zipped then removed
+const BUILD = "build";
+const STAGE = path.join(BUILD, "staging"); // module contents, zipped then removed
 
 /** Prefer 7zz (macOS/Homebrew p7zip), fall back to 7z (Windows / Ubuntu p7zip-full). */
 function resolveSevenZip() {
-  const candidates = process.platform === 'win32' ? ['7z'] : ['7zz', '7z'];
+  const candidates = process.platform === "win32" ? ["7z"] : ["7zz", "7z"];
   for (const bin of candidates) {
-    const result = spawnSync(bin, [], { encoding: 'utf8' });
-    if (result.error?.code !== 'ENOENT') return bin;
+    const result = spawnSync(bin, [], { encoding: "utf8" });
+    if (result.error?.code !== "ENOENT") return bin;
   }
   return candidates[0];
 }
@@ -35,7 +35,7 @@ fs.mkdirSync(STAGE, { recursive: true });
 await esbuild.build({
   ...bundleConfig,
   minify: true,
-  outfile: path.join(STAGE, 'module.js'),
+  outfile: path.join(STAGE, "module.js"),
 });
 
 // The pdf.js worker is fetched at runtime rather than bundled, so ship it too
@@ -44,20 +44,24 @@ await copyPdfWorker(STAGE);
 
 // Static assets: the manifest Foundry reads, the Handlebars templates the config
 // dialog loads, and the localization files.
-fs.copyFileSync('module.json', path.join(STAGE, 'module.json'));
-fs.cpSync('templates', path.join(STAGE, 'templates'), { recursive: true });
-fs.cpSync('lang', path.join(STAGE, 'lang'), { recursive: true });
+fs.copyFileSync("module.json", path.join(STAGE, "module.json"));
+fs.cpSync("templates", path.join(STAGE, "templates"), { recursive: true });
+fs.cpSync("lang", path.join(STAGE, "lang"), { recursive: true });
 
 // Pack the staged files at the zip root (run from STAGE so paths have no prefix)
 // with maximum compression, then drop the manifest next to the zip and clean up.
-const archive = path.resolve(BUILD, 'module.zip');
+const archive = path.resolve(BUILD, "module.zip");
 try {
-  execFileSync(SEVEN_ZIP, ['a', '-tzip', '-mx=9', '-bso0', '-bsp0', archive, '.'], {
-    cwd: STAGE,
-    stdio: ['ignore', 'ignore', 'inherit'],
-  });
+  execFileSync(
+    SEVEN_ZIP,
+    ["a", "-tzip", "-mx=9", "-bso0", "-bsp0", archive, "."],
+    {
+      cwd: STAGE,
+      stdio: ["ignore", "ignore", "inherit"],
+    },
+  );
 } catch (err) {
-  if (err.code === 'ENOENT')
+  if (err.code === "ENOENT")
     throw new Error(
       `7-Zip not found — install it and ensure "7z" or "7zz" is on PATH ` +
         `(Windows: 7-Zip provides "7z"; Linux/macOS: p7zip provides "7zz" or "7z").`,
@@ -65,7 +69,7 @@ try {
   throw err;
 }
 
-fs.copyFileSync('module.json', path.join(BUILD, 'module.json'));
+fs.copyFileSync("module.json", path.join(BUILD, "module.json"));
 fs.rmSync(STAGE, { recursive: true, force: true });
 
 console.log(`✅ Release built: ${BUILD}/module.zip + ${BUILD}/module.json`);
