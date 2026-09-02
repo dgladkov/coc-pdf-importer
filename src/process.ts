@@ -3245,7 +3245,7 @@ async function processPage(
 // the shared representation both parsers work from: the actor parser merges it
 // into font/height runs, the item parser flattens it to plain text.
 async function extractPages(data: Uint8Array): Promise<RawItem[][]> {
-  const pdf = await pdfjs.getDocument({ data }).promise;
+  const pdf = await pdfjs.getDocument({ data, useSystemFonts: true }).promise;
   const pages: Promise<RawItem[]>[] = [];
   for (let i = 1; i <= pdf.numPages; i++) {
     pages.push(processPage(pdf, i));

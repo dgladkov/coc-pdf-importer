@@ -22,7 +22,7 @@ async function processPage(pdf: pdfjs.PDFDocumentProxy, i: number) {
 
 async function dump(file: string) {
   const data = new Uint8Array(await fs.readFile(file));
-  const pdf = await pdfjs.getDocument({ data }).promise;
+  const pdf = await pdfjs.getDocument({ data, useSystemFonts: true }).promise;
   const pages: Promise<string>[] = [];
   for (let i = 1; i <= pdf.numPages; i++) pages.push(processPage(pdf, i));
   return (await Promise.all(pages)).join("\n\n===PAGE BREAK===\n\n");
