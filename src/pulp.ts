@@ -10,11 +10,7 @@
 // reads the PDF once); turning these into Foundry documents and creating them in
 // the world is the importer's job (see document.ts).
 
-export type TalentCategory =
-  | "physical"
-  | "mental"
-  | "combat"
-  | "miscellaneous";
+export type TalentCategory = "physical" | "mental" | "combat" | "miscellaneous";
 
 export interface PulpTalent {
   name: string;
@@ -152,14 +148,37 @@ export function parsePulpTalents(text: string): PulpTalent[] {
 // book-specific approach the user signed off on for this import.
 
 const ARCHETYPE_NAMES = [
-  "Adventurer", "Beefcake", "Bon Vivant", "Cold Blooded", "Dreamer", "Egghead",
-  "Explorer", "Femme Fatale", "Grease Monkey", "Hard Boiled", "Harlequin",
-  "Hunter", "Mystic", "Outsider", "Rogue", "Scholar", "Seeker", "Sidekick",
-  "Steadfast", "Swashbuckler", "Thrill Seeker", "Two-Fisted",
+  "Adventurer",
+  "Beefcake",
+  "Bon Vivant",
+  "Cold Blooded",
+  "Dreamer",
+  "Egghead",
+  "Explorer",
+  "Femme Fatale",
+  "Grease Monkey",
+  "Hard Boiled",
+  "Harlequin",
+  "Hunter",
+  "Mystic",
+  "Outsider",
+  "Rogue",
+  "Scholar",
+  "Seeker",
+  "Sidekick",
+  "Steadfast",
+  "Swashbuckler",
+  "Thrill Seeker",
+  "Two-Fisted",
 ];
 
 const CORE_CHARS = ["str", "con", "siz", "dex", "app", "int", "pow", "edu"];
-const TALENT_WORD_NUM: Record<string, number> = { one: 1, two: 2, three: 3, four: 4 };
+const TALENT_WORD_NUM: Record<string, number> = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+};
 
 // A few source skill lists carry non-canonical names; normalize each to the real
 // system skill name(s). An entry can expand to more than one ("Firearms (Rifle
@@ -194,7 +213,10 @@ const ARCH_NAME_ALT = [...ARCHETYPE_NAMES]
   .map((n) => escapeReChars(n).replace(/ /g, "[ -]"))
   .join("|");
 const ARCH_NAME_START = new RegExp("^(?:" + ARCH_NAME_ALT + ")\\b");
-const ARCH_MARGIN_RUN = new RegExp("(?:\\b(?:" + ARCH_NAME_ALT + ")\\b[ ,]*){2,}", "g");
+const ARCH_MARGIN_RUN = new RegExp(
+  "(?:\\b(?:" + ARCH_NAME_ALT + ")\\b[ ,]*){2,}",
+  "g",
+);
 
 // Drop page-running headers/footers and illustration credits that PDF extraction
 // interleaves into the archetype prose.
@@ -261,9 +283,9 @@ const archField = (body: string, re: RegExp) =>
 // nothing.
 export function parsePulpArchetypes(rawText: string): PulpArchetype[] {
   const text = stripArchetypeArtifacts(rawText);
-  const adj = [...text.matchAll(/\bAdjustments\s+•\s*Core characteristic/g)].map(
-    (m) => m.index!,
-  );
+  const adj = [
+    ...text.matchAll(/\bAdjustments\s+•\s*Core characteristic/g),
+  ].map((m) => m.index!);
   if (adj.length === 0) return [];
 
   const count = Math.min(adj.length, ARCHETYPE_NAMES.length);
@@ -288,7 +310,8 @@ export function parsePulpArchetypes(rawText: string): PulpArchetype[] {
     const coreCharacteristics = CORE_CHARS.filter((c) =>
       new RegExp("\\b" + c.toUpperCase() + "\\b").test(coreRaw),
     );
-    const bonusPoints = Number(archField(body, /Add\s+(\d+)\s+bonus points/)) || 100;
+    const bonusPoints =
+      Number(archField(body, /Add\s+(\d+)\s+bonus points/)) || 100;
     // The skill list may carry a trailing "; <clause>" note (e.g. Mystic's "if
     // the Psychic talent is taken, allocate skill points to the chosen psychic
     // skill(s)"). Split it off and fold it into the description rather than
@@ -297,7 +320,10 @@ export function parsePulpArchetypes(rawText: string): PulpArchetype[] {
     const semicolon = skillsRaw.indexOf(";");
     const skillNote =
       semicolon >= 0
-        ? skillsRaw.slice(semicolon + 1).replace(/\.\s*$/, "").trim()
+        ? skillsRaw
+            .slice(semicolon + 1)
+            .replace(/\.\s*$/, "")
+            .trim()
         : "";
     if (skillNote) description += " " + capitalizeFirst(skillNote) + ".";
     // Skill names are tidied ("(any)" -> "(Any)") and normalized to canonical
@@ -354,6 +380,9 @@ export type PulpItem =
 export function parsePulpItems(text: string): PulpItem[] {
   return [
     ...parsePulpTalents(text).map((t) => ({ kind: "talent" as const, ...t })),
-    ...parsePulpArchetypes(text).map((a) => ({ kind: "archetype" as const, ...a })),
+    ...parsePulpArchetypes(text).map((a) => ({
+      kind: "archetype" as const,
+      ...a,
+    })),
   ];
 }

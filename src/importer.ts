@@ -162,7 +162,11 @@ function pulpVariant(character: CocCharacter): CocCharacter {
     if (!combat.some((entry) => same(entry, p))) combat.push(p);
   const characteristics = { ...character.characteristics };
   if (pulp.hp != null)
-    characteristics.HP = { value: pulp.hp, raw: String(pulp.hp), marked: false };
+    characteristics.HP = {
+      value: pulp.hp,
+      raw: String(pulp.hp),
+      marked: false,
+    };
   const derived = { ...character.derived };
   if (pulp.luck != null) derived.Luck = pulp.luck;
   return {
@@ -177,7 +181,13 @@ function pulpVariant(character: CocCharacter): CocCharacter {
 // The talent category flags of a CoC7 talent item; an inline talent built from
 // a stat block has no known category.
 const TALENT_TYPE_FLAGS = [
-  "physical", "mental", "combat", "miscellaneous", "basic", "insane", "other",
+  "physical",
+  "mental",
+  "combat",
+  "miscellaneous",
+  "basic",
+  "insane",
+  "other",
 ] as const;
 
 // Embedded talent items for a "Pulp Talents" list. A talent already in the
@@ -524,7 +534,9 @@ function meleeCandidates(attack: CombatEntry): string[] {
       ? ["Sword, heavy (cavalry saber)"]
       : ["Sword, medium (rapier, heavy epee)"];
   }
-  if (/\bknife\b|\bdagger\b|switchblade|straight razor|\bmachete\b/.test(name)) {
+  if (
+    /\bknife\b|\bdagger\b|switchblade|straight razor|\bmachete\b/.test(name)
+  ) {
     const size = /^1d8\b/.test(dmg)
       ? "Large"
       : /^1d4\+2\b/.test(dmg)
@@ -562,10 +574,26 @@ const WEAPON_ALIASES: {
 }[] = [
   { re: /\bthompson\b/i, names: ["Thompson (50 mag)", "Thompson"] },
   // handgun automatics (before the caliber default)
-  { re: /\.45\b.*\b(auto|automatic|pistol)\b/i, names: [".45 Automatic"], handgun: true },
-  { re: /\.38\b.*\b(auto|automatic|pistol)\b/i, names: [".38 Automatic"], handgun: true },
-  { re: /\.32\b.*\b(auto|automatic|pistol)\b/i, names: [".32 or 7.65mm Automatic"], handgun: true },
-  { re: /\.22\b.*\b(auto|automatic)\b/i, names: [".22 Short Automatic"], handgun: true },
+  {
+    re: /\.45\b.*\b(auto|automatic|pistol)\b/i,
+    names: [".45 Automatic"],
+    handgun: true,
+  },
+  {
+    re: /\.38\b.*\b(auto|automatic|pistol)\b/i,
+    names: [".38 Automatic"],
+    handgun: true,
+  },
+  {
+    re: /\.32\b.*\b(auto|automatic|pistol)\b/i,
+    names: [".32 or 7.65mm Automatic"],
+    handgun: true,
+  },
+  {
+    re: /\.22\b.*\b(auto|automatic)\b/i,
+    names: [".22 Short Automatic"],
+    handgun: true,
+  },
   // handgun revolvers / caliber defaults
   { re: /\.45\b.*revolver/i, names: [".45 Revolver"], handgun: true },
   { re: /\.45\b/i, names: [".45 Automatic"], handgun: true },
@@ -579,7 +607,10 @@ const WEAPON_ALIASES: {
   { re: /\.30-06\b/i, names: [".30-06 Bolt-Action Rifle"] },
   { re: /\.303\b/i, names: [".303 Lee-Enfield"] },
   { re: /\belephant\b[^.]*\bgun\b/i, names: ["Elephant Gun (2B)"] },
-  { re: /browning\s+auto(?:matic)?\s+rifle/i, names: ["Browning Auto Rifle M1918"] },
+  {
+    re: /browning\s+auto(?:matic)?\s+rifle/i,
+    names: ["Browning Auto Rifle M1918"],
+  },
   // named handguns whose flavor name hides a standard caliber
   { re: /\bwebley\b/i, names: [".38 or 9mm Revolver"], handgun: true },
   { re: /\bnambu\b/i, names: [".32 or 7.65mm Automatic"], handgun: true },
@@ -673,7 +704,9 @@ function buildItems(
   // inflate a below-EDU value.
   const edu = character.characteristics.EDU?.value ?? null;
   for (const [name, value] of langEntries) {
-    addSkill(languageItem(name, value, edu != null && value === edu, indexes.skill));
+    addSkill(
+      languageItem(name, value, edu != null && value === edu, indexes.skill),
+    );
   }
 
   // Combat: Dodge is a skill; anything else becomes a weapon. A non-thrown
@@ -701,7 +734,9 @@ function buildItems(
         { ref: weapon.system?.skill?.alternativ?.name, value: 0 },
       ];
       for (const { ref, value } of refs) {
-        const skill = ref ? weaponSkillItem(ref, value, ranged, indexes.skill) : null;
+        const skill = ref
+          ? weaponSkillItem(ref, value, ranged, indexes.skill)
+          : null;
         if (skill) addSkill(skill);
       }
       base.push(weapon);
@@ -749,10 +784,14 @@ function halfDamageBonus(db: string): string {
   if (!/^[+-]/.test(f)) f = "+" + f;
   return f.replace(/([+-])(\d+)(?:[dD](\d+))?/g, (_m, sign, n, sides) => {
     if (sides === undefined) {
-      const v = sign === "-" ? Math.ceil(Number(n) / 2) : Math.floor(Number(n) / 2);
+      const v =
+        sign === "-" ? Math.ceil(Number(n) / 2) : Math.floor(Number(n) / 2);
       return sign + v;
     }
-    const half = sign === "-" ? Math.ceil(Number(sides) / 2) : Math.floor(Number(sides) / 2);
+    const half =
+      sign === "-"
+        ? Math.ceil(Number(sides) / 2)
+        : Math.floor(Number(sides) / 2);
     return sign + n + "D" + half;
   });
 }
@@ -820,7 +859,10 @@ function overrideBookDamage(
   attack: CombatEntry,
   db: string | null,
 ): void {
-  const { damage, addb, ahdb, valid } = normalizeWeaponDamage(attack.damage, db);
+  const { damage, addb, ahdb, valid } = normalizeWeaponDamage(
+    attack.damage,
+    db,
+  );
   if (!valid) return;
   const sys = (weapon.system = weapon.system ?? {});
   const range = (sys.range = sys.range ?? {});
@@ -936,13 +978,12 @@ async function attachCustomWeapons(
         renderSheet: false,
       })) ?? [])
     : [];
-  const createdByName = new Map(
-    createdSkills.map((d: any) => [d.name, d]),
-  );
+  const createdByName = new Map(createdSkills.map((d: any) => [d.name, d]));
 
   const weapons = resolved.map(({ weapon, skill }) => {
     if (skill) {
-      const doc = skill.id ?? skill._id ? skill : createdByName.get(skill.name);
+      const doc =
+        (skill.id ?? skill._id) ? skill : createdByName.get(skill.name);
       if (doc)
         weapon.system.skill.main = {
           id: doc.id ?? doc._id ?? "",

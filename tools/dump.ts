@@ -5,17 +5,17 @@
 //   npm run dump:text -- "<file.pdf>" # just that one (resolved in fixtures/)
 //
 // Reads from fixtures/ (see fixtures/README.md); writes gitignored out/*.txt.
-import fs from 'node:fs/promises';
-import process from 'node:process';
-import * as pdfjs from 'pdfjs-dist';
-import { FIXTURES, OUT, pdfInputs, outPath } from './fixtures.ts';
+import fs from "node:fs/promises";
+import process from "node:process";
+import * as pdfjs from "pdfjs-dist";
+import { FIXTURES, OUT, pdfInputs, outPath } from "./fixtures.ts";
 
 async function processPage(pdf: pdfjs.PDFDocumentProxy, i: number) {
   const page = await pdf.getPage(i);
   const content = await page.getTextContent();
-  let out = '';
+  let out = "";
   for (const item of content.items as any[]) {
-    out += ' ' + item.str;
+    out += " " + item.str;
   }
   return out;
 }
@@ -25,7 +25,7 @@ async function dump(file: string) {
   const pdf = await pdfjs.getDocument({ data }).promise;
   const pages: Promise<string>[] = [];
   for (let i = 1; i <= pdf.numPages; i++) pages.push(processPage(pdf, i));
-  return (await Promise.all(pages)).join('\n\n===PAGE BREAK===\n\n');
+  return (await Promise.all(pages)).join("\n\n===PAGE BREAK===\n\n");
 }
 
 const inputs = await pdfInputs();
@@ -37,14 +37,16 @@ if (inputs.length === 0) {
 await fs.mkdir(OUT, { recursive: true });
 
 for (const input of inputs) {
-  const output = outPath(input, '.txt');
+  const output = outPath(input, ".txt");
   let text: string;
   try {
     text = await dump(input);
   } catch (e) {
-    console.warn(`skip ${input} (${e instanceof Error ? e.message : String(e)})`);
+    console.warn(
+      `skip ${input} (${e instanceof Error ? e.message : String(e)})`,
+    );
     continue;
   }
   await fs.writeFile(output, text);
-  console.log('wrote', text.length, 'chars to', output);
+  console.log("wrote", text.length, "chars to", output);
 }

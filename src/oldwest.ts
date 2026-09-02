@@ -13,19 +13,21 @@ function escapeRe(s: string): string {
 }
 
 function cleanSpaces(s: string): string {
-  return s
-    .replace(/\(\s+/g, "(")
-    .replace(/\s+\)/g, ")")
-    .replace(/\s+([,;:])/g, "$1")
-    // Collapse space-before-period only for a real sentence end, not a caliber
-    // marker (".22", ".44") — those keep their leading space ("or .22", "Big
-    // .50") since the period there belongs to the number, not the prior word.
-    .replace(/\s+\.(?!\d)/g, ".")
-    // Close a spurious space PDF extraction leaves inside a compound
-    // ("Spear/ Brawl" -> "Spear/Brawl").
-    .replace(/\/\s+/g, "/")
-    .replace(/\s+/g, " ")
-    .trim();
+  return (
+    s
+      .replace(/\(\s+/g, "(")
+      .replace(/\s+\)/g, ")")
+      .replace(/\s+([,;:])/g, "$1")
+      // Collapse space-before-period only for a real sentence end, not a caliber
+      // marker (".22", ".44") — those keep their leading space ("or .22", "Big
+      // .50") since the period there belongs to the number, not the prior word.
+      .replace(/\s+\.(?!\d)/g, ".")
+      // Close a spurious space PDF extraction leaves inside a compound
+      // ("Spear/ Brawl" -> "Spear/Brawl").
+      .replace(/\/\s+/g, "/")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
 }
 
 // This book's running headers/footers ("20 20 CHAPTER 1", "41 41 EQUIPMENT &
@@ -33,23 +35,25 @@ function cleanSpaces(s: string): string {
 // decorative dingbat font used for chapter-opening ornaments extracts as
 // Private Use Area codepoints. Strip both so neither leaks into parsed fields.
 function stripFurniture(s: string): string {
-  return s
-    .replace(/[-]/g, " ")
-    .replace(/\b\d{1,3}\s+\d{1,3}\s+CHAPTER\s+\d+\b/g, " ")
-    .replace(/\b\d{1,3}\s+\d{1,3}\s+OLD WEST INVESTIGATORS\b/gi, " ")
-    .replace(/\b\d{1,3}\s+\d{1,3}\s+EQUIPMENT\s*(?:&|and)\s*WEAPONS\b/gi, " ")
-    .replace(/\b\d{1,3}\s+\d{1,3}\s+THE SUPERNATURAL WEST\b/gi, " ")
-    // An illustration-only page prints just its own page number once, not the
-    // usual repeated "NN NN" header pair, before this same running title.
-    .replace(/\b\d{1,3}\s+THE SUPERNATURAL WEST\b/gi, " ")
-    // A photo caption sits directly before the spells chapter's first entry,
-    // with no punctuation between them once the running header above is gone.
-    .replace(/\bA Hopi Snake Priest\b/g, " ")
-    // An "Opposite: <caption>" plate credit lands mid-sentence in Unmask
-    // Demon's description at a page break.
-    .replace(/\bOpposite:\s*The Sun Dance\b/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return (
+    s
+      .replace(/[-]/g, " ")
+      .replace(/\b\d{1,3}\s+\d{1,3}\s+CHAPTER\s+\d+\b/g, " ")
+      .replace(/\b\d{1,3}\s+\d{1,3}\s+OLD WEST INVESTIGATORS\b/gi, " ")
+      .replace(/\b\d{1,3}\s+\d{1,3}\s+EQUIPMENT\s*(?:&|and)\s*WEAPONS\b/gi, " ")
+      .replace(/\b\d{1,3}\s+\d{1,3}\s+THE SUPERNATURAL WEST\b/gi, " ")
+      // An illustration-only page prints just its own page number once, not the
+      // usual repeated "NN NN" header pair, before this same running title.
+      .replace(/\b\d{1,3}\s+THE SUPERNATURAL WEST\b/gi, " ")
+      // A photo caption sits directly before the spells chapter's first entry,
+      // with no punctuation between them once the running header above is gone.
+      .replace(/\bA Hopi Snake Priest\b/g, " ")
+      // An "Opposite: <caption>" plate credit lands mid-sentence in Unmask
+      // Demon's description at a page break.
+      .replace(/\bOpposite:\s*The Sun Dance\b/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -61,12 +65,31 @@ function stripFurniture(s: string): string {
 // each occupation's own "• Occupation Skill Points:" bullet is a reliable
 // anchor, but the heading text above it needs a known name to search for.
 const OCCUPATION_NAMES = [
-  "Artist", "Confidence Trickster", "Cowboy/Cowgirl", "Craftsperson",
-  "Dilettante/Greenhorn", "Doctor", "Entertainer", "Expressman/Expresswoman",
-  "Farmer", "Gambler", "Gunfighter", "Hobo/Drifter", "Journalist/Author",
-  "Lawman", "Lawyer/Judge", "Man or Woman of God", "Merchant",
-  "Miner/Prospector", "Outlaw", "Politician", "Rancher", "Scholar/Teacher",
-  "Scientist/Engineer", "Scout/Mountain Man or Woman", "Soldier/Warrior",
+  "Artist",
+  "Confidence Trickster",
+  "Cowboy/Cowgirl",
+  "Craftsperson",
+  "Dilettante/Greenhorn",
+  "Doctor",
+  "Entertainer",
+  "Expressman/Expresswoman",
+  "Farmer",
+  "Gambler",
+  "Gunfighter",
+  "Hobo/Drifter",
+  "Journalist/Author",
+  "Lawman",
+  "Lawyer/Judge",
+  "Man or Woman of God",
+  "Merchant",
+  "Miner/Prospector",
+  "Outlaw",
+  "Politician",
+  "Rancher",
+  "Scholar/Teacher",
+  "Scientist/Engineer",
+  "Scout/Mountain Man or Woman",
+  "Soldier/Warrior",
   "Unskilled Laborer",
 ];
 
@@ -156,9 +179,7 @@ function splitSkillSegments(raw: string): string[] {
     }
   }
   parts.push(raw.slice(start));
-  return parts
-    .map((p) => p.replace(/^\s*and\s+/i, "").trim())
-    .filter(Boolean);
+  return parts.map((p) => p.replace(/^\s*and\s+/i, "").trim()).filter(Boolean);
 }
 
 // Sort a skills list (already comma-split) into fixed/common skills, "choose N
@@ -264,7 +285,10 @@ export function parseOldWestOccupations(rawText: string): OldWestOccupation[] {
     if (i + 1 < count) {
       windowEnd = headingStart[i + 1];
     } else {
-      const tailWindow = text.slice(anchor, Math.min(text.length, anchor + 2500));
+      const tailWindow = text.slice(
+        anchor,
+        Math.min(text.length, anchor + 2500),
+      );
       const tail = tailWindow.match(/\bSKILL LIST\b/);
       windowEnd = tail ? anchor + tail.index! : anchor + tailWindow.length;
     }
@@ -310,8 +334,13 @@ export function parseOldWestOccupations(rawText: string): OldWestOccupation[] {
 // book-specific name list in print order (same anchor-list approach as the
 // occupations above).
 const ALTERED_SKILL_NAMES = [
-  "Drive Auto", "Drive Wagon/Coach", "Electrical Repair", "Natural World",
-  "Psychology", "Language (Own)", "Ride",
+  "Drive Auto",
+  "Drive Wagon/Coach",
+  "Electrical Repair",
+  "Natural World",
+  "Psychology",
+  "Language (Own)",
+  "Ride",
 ];
 const NEW_SKILL_NAMES = ["Gambling", "Language (Indian)", "Rope Use", "Trap"];
 
@@ -324,12 +353,10 @@ export interface OldWestSkill {
 // All four "NEW SKILLS" entries with game-mechanical Push rules end on this
 // exact sentence pattern; when present it is a tighter, more reliable end
 // boundary than "next known name" (which the last entry in a group lacks).
-const PUSH_INSANE_SENTENCE = /If an insane investigator fails a pushed roll,[^.]*\./;
+const PUSH_INSANE_SENTENCE =
+  /If an insane investigator fails a pushed roll,[^.]*\./;
 
-function parseSkillNameGroup(
-  names: string[],
-  section: string,
-): OldWestSkill[] {
+function parseSkillNameGroup(names: string[], section: string): OldWestSkill[] {
   const skills: OldWestSkill[] = [];
   let searchFrom = 0;
   for (let i = 0; i < names.length; i++) {
@@ -354,7 +381,8 @@ function parseSkillNameGroup(
     }
     let description = cleanSpaces(section.slice(descStart, descEnd));
     const insane = PUSH_INSANE_SENTENCE.exec(description);
-    if (insane) description = description.slice(0, insane.index + insane[0].length);
+    if (insane)
+      description = description.slice(0, insane.index + insane[0].length);
 
     skills.push({ name: names[i], base: cleanSpaces(m[1]), description });
     searchFrom = descStart;
@@ -368,9 +396,13 @@ export function parseOldWestSkills(rawText: string): OldWestSkill[] {
   const newHeader = text.indexOf("NEW SKILLS", alteredHeader);
   if (alteredHeader < 0 || newHeader < 0) return [];
   const endMarker = text.indexOf("EQUIPMENT & WEAPONS", newHeader);
-  const end = endMarker >= 0 ? endMarker : Math.min(text.length, newHeader + 6000);
+  const end =
+    endMarker >= 0 ? endMarker : Math.min(text.length, newHeader + 6000);
 
-  const alteredSection = text.slice(alteredHeader + "ALTERED SKILLS".length, newHeader);
+  const alteredSection = text.slice(
+    alteredHeader + "ALTERED SKILLS".length,
+    newHeader,
+  );
   const newSection = text.slice(newHeader + "NEW SKILLS".length, end);
 
   return [
@@ -474,7 +506,9 @@ function findFirearmTables(text: string): FirearmTableSpec[] {
     // Bound the rule-bullets text at the table's own column-header row, not a
     // bare "Gun" (which also occurs mid-word in a rule bullet, e.g. "Machine
     // Gun)" in the Heavy Weapons skill note — that would truncate it early.
-    const headerRow = text.slice(start).match(/\bGun\s+Damage\s+Base\s+Range\b/);
+    const headerRow = text
+      .slice(start)
+      .match(/\bGun\s+Damage\s+Base\s+Range\b/);
     const ruleText = headerRow
       ? text.slice(start, start + headerRow.index!)
       : "";
@@ -490,15 +524,23 @@ function findFirearmTables(text: string): FirearmTableSpec[] {
     specs.push({
       header,
       defaultSkill: skillMatch ? cleanSpaces(skillMatch[1]) : "",
-      exceptionName: exceptionMatch ? cleanSpaces(exceptionMatch[1]) : undefined,
-      exceptionSkill: exceptionMatch ? cleanSpaces(exceptionMatch[2]) : undefined,
+      exceptionName: exceptionMatch
+        ? cleanSpaces(exceptionMatch[1])
+        : undefined,
+      exceptionSkill: exceptionMatch
+        ? cleanSpaces(exceptionMatch[2])
+        : undefined,
       impale: !/cannot impale/i.test(ruleText),
     });
   }
   return specs;
 }
 
-function sectionBounds(text: string, header: string, allHeaders: string[]): {
+function sectionBounds(
+  text: string,
+  header: string,
+  allHeaders: string[],
+): {
   start: number;
   end: number;
 } {
@@ -568,7 +610,10 @@ function parseFirearmSection(
   return weapons;
 }
 
-function parseMeleeSection(text: string, allHeaders: string[]): OldWestWeapon[] {
+function parseMeleeSection(
+  text: string,
+  allHeaders: string[],
+): OldWestWeapon[] {
   const { start, end } = sectionBounds(text, "MELEE WEAPONS", allHeaders);
   if (start < 0) return [];
   const section = text.slice(start, end);
@@ -609,7 +654,9 @@ export function parseOldWestWeapons(rawText: string): OldWestWeapon[] {
   if (firearmSpecs.length === 0) return [];
   const allHeaders = [...firearmSpecs.map((s) => s.header), "MELEE WEAPONS"];
   return [
-    ...firearmSpecs.flatMap((spec) => parseFirearmSection(text, spec, allHeaders)),
+    ...firearmSpecs.flatMap((spec) =>
+      parseFirearmSection(text, spec, allHeaders),
+    ),
     ...parseMeleeSection(text, allHeaders),
   ];
 }
@@ -643,7 +690,10 @@ function extractOldWestSpellTitle(before: string): string {
 // word), same shape as the book's "N days to create; N round to use" compound
 // times. A single-letter word ("A defensive spell...") must still count as a
 // sentence start, hence "\w*" rather than requiring a second, lowercase letter.
-function parseOldWestCastingTime(rest: string): { castingTime: string; length: number } {
+function parseOldWestCastingTime(rest: string): {
+  castingTime: string;
+  length: number;
+} {
   const m = rest.match(/^([^.]*?)(?=\s+[A-Z]\w*)/);
   if (m) return { castingTime: cleanSpaces(m[1]), length: m[0].length };
   const fallback = cleanSpaces(rest.slice(0, 40));
@@ -659,7 +709,10 @@ export function parseOldWestSpells(rawText: string): OldWestSpell[] {
   const text = cleanSpaces(stripFurniture(rawText));
   const sectionStart = text.indexOf("SHAMANIC (FOLK) MAGIC");
   if (sectionStart < 0) return [];
-  const sectionEndMarker = text.indexOf("CULTS AND SECRET SOCIETIES", sectionStart);
+  const sectionEndMarker = text.indexOf(
+    "CULTS AND SECRET SOCIETIES",
+    sectionStart,
+  );
   const section =
     sectionEndMarker >= 0
       ? text.slice(sectionStart, sectionEndMarker)
@@ -697,7 +750,8 @@ export function parseOldWestSpells(rawText: string): OldWestSpell[] {
     // The default bound (the next anchor's own "• Cost:") includes that next
     // spell's title, printed right before its Cost bullet; trim the body back
     // to where that title starts so it doesn't leak into this description.
-    let bodyEnd = i + 1 < anchors.length ? anchors[i + 1].index : section.length;
+    let bodyEnd =
+      i + 1 < anchors.length ? anchors[i + 1].index : section.length;
     if (i + 1 < anchors.length) {
       const nextBefore = section.slice(a.afterCast, anchors[i + 1].index);
       const nextTitle = extractOldWestSpellTitle(nextBefore);

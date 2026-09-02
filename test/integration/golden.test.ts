@@ -99,7 +99,11 @@ describe("no actor falls back to an Unknown name", () => {
       if (!pdfBuf) return t.skip("fixture PDF missing");
       const { actors } = await processPDF(new Uint8Array(pdfBuf));
       const unknown = actors.filter((a) => a.name === "Unknown").length;
-      assert.equal(unknown, 0, `${unknown} actor(s) named "Unknown" in ${base}`);
+      assert.equal(
+        unknown,
+        0,
+        `${unknown} actor(s) named "Unknown" in ${base}`,
+      );
     });
   }
 });

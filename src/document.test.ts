@@ -31,7 +31,10 @@ describe("pulpItemDoc", () => {
     assert.equal(item.img, undefined); // icon assigned at creation, not from source
     assert.equal(item.system.source, "Test Source");
     // Escaped, not <p>-wrapped.
-    assert.equal(item.system.description.value, "Lifts &amp; holds &lt;stuff&gt;.");
+    assert.equal(
+      item.system.description.value,
+      "Lifts &amp; holds &lt;stuff&gt;.",
+    );
     assert.equal(item.system.description.notes, "");
     assert.deepEqual(item.system.adjustments, []);
     assert.deepEqual(item.system.type, {
@@ -68,7 +71,10 @@ describe("pulpItemDoc", () => {
     assert.equal(item.system.talents, 2);
     assert.equal(item.system.coreCharacteristics.con, true);
     assert.equal(item.system.coreCharacteristics.str, false);
-    assert.equal(item.system.description.value, "Tough &amp; &lt;streetwise&gt;.");
+    assert.equal(
+      item.system.description.value,
+      "Tough &amp; &lt;streetwise&gt;.",
+    );
     // The list arrays are reassembled into strings for the Foundry HTML fields.
     assert.equal(item.system.suggestedOccupations, "Gangster, Boxer");
     assert.equal(item.system.suggestedTraits, "cynical, violent");
@@ -105,7 +111,10 @@ describe("pulpItemDoc", () => {
     assert.equal(item.system.costs.magicPoints, "4");
     assert.equal(item.system.costs.sanity, "1d2");
     assert.deepEqual(item.system.costList, []);
-    assert.match(item.system.description.value, /Makes fog &amp; &lt;mist&gt;\./);
+    assert.match(
+      item.system.description.value,
+      /Makes fog &amp; &lt;mist&gt;\./,
+    );
     assert.equal(item.system.source, "Test Source");
   });
 
@@ -210,10 +219,17 @@ describe("pulpItemDoc", () => {
       "i.skill.art-craft-any",
     ]);
     assert.deepEqual(item.system.groups, [
-      { options: 1, itemDocuments: [], itemKeys: ["i.skill.charm", "i.skill.persuade"] },
+      {
+        options: 1,
+        itemDocuments: [],
+        itemKeys: ["i.skill.charm", "i.skill.persuade"],
+      },
     ]);
     assert.equal(item.system.personal, 2);
-    assert.equal(item.system.personalText, "other skills as personal specialties");
+    assert.equal(
+      item.system.personalText,
+      "other skills as personal specialties",
+    );
   });
 
   test("an occupation's Special clause is folded into its description as a second paragraph", () => {
@@ -233,7 +249,10 @@ describe("pulpItemDoc", () => {
       "Test Source",
     );
     assert.match(item.system.description.value, /Flavor text\.<\/p>/);
-    assert.match(item.system.description.value, /Special: limited Sanity loss immunity/);
+    assert.match(
+      item.system.description.value,
+      /Special: limited Sanity loss immunity/,
+    );
   });
 
   test("builds a skill item from an altered/new skill write-up", () => {
@@ -403,29 +422,53 @@ describe("createPulpItems", () => {
 
   test("reuses existing document + subfolders instead of recreating them", async () => {
     folders.push({ id: "p", name: "Book", type: "Item", folder: null });
-    folders.push({ id: "s", name: "Talents", type: "Item", folder: { id: "p" } });
-    await createPulpItems([talent("Alpha")], { folderName: "Book", notify: false });
+    folders.push({
+      id: "s",
+      name: "Talents",
+      type: "Item",
+      folder: { id: "p" },
+    });
+    await createPulpItems([talent("Alpha")], {
+      folderName: "Book",
+      notify: false,
+    });
     assert.equal(folders.length, 2); // none created
     assert.equal(created[0].folder, "s");
   });
 
   test("re-import replaces a same-named item in its subfolder", async () => {
     folders.push({ id: "p", name: "Book", type: "Item", folder: null });
-    folders.push({ id: "s", name: "Talents", type: "Item", folder: { id: "p" } });
-    const old: any = { id: "old", name: "Alpha", folder: { id: "s" }, deleted: false };
+    folders.push({
+      id: "s",
+      name: "Talents",
+      type: "Item",
+      folder: { id: "p" },
+    });
+    const old: any = {
+      id: "old",
+      name: "Alpha",
+      folder: { id: "s" },
+      deleted: false,
+    };
     old.delete = async () => {
       old.deleted = true;
       world.splice(world.indexOf(old), 1);
     };
     world.push(old);
-    await createPulpItems([talent("Alpha")], { folderName: "Book", notify: false });
+    await createPulpItems([talent("Alpha")], {
+      folderName: "Book",
+      notify: false,
+    });
     assert.equal(old.deleted, true); // pre-existing Alpha removed
     assert.equal(world.filter((i) => i.name === "Alpha").length, 1); // exactly one
     assert.equal(created.find((i) => i.name === "Alpha").deleted, false); // new one kept
   });
 
   test("no items creates nothing and no folders", async () => {
-    const res = await createPulpItems([], { folderName: "Book", notify: false });
+    const res = await createPulpItems([], {
+      folderName: "Book",
+      notify: false,
+    });
     assert.equal(res.created, 0);
     assert.equal(folders.length, 0);
   });

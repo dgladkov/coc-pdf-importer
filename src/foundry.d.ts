@@ -42,7 +42,9 @@ interface FoundryItem {
 
 interface FoundryGame {
   i18n: FoundryI18n;
-  actors?: { filter(predicate: (actor: FoundryActor) => boolean): FoundryActor[] };
+  actors?: {
+    filter(predicate: (actor: FoundryActor) => boolean): FoundryActor[];
+  };
   items?: { filter(predicate: (item: FoundryItem) => boolean): FoundryItem[] };
   folders?: {
     find(

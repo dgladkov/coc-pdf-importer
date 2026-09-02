@@ -253,10 +253,11 @@ describe("Masks of Nyarlathotep", () => {
     // The brawl damage must not swallow the following attacks; the inline
     // "or small knife/straight razor 1D4" splits into its own weapon.
     assert.equal(c.combat.find((a) => a.name === "Brawl")!.damage, "1D3");
-    const knife = c.combat.find(
-      (a) => a.name === "Small knife/straight razor",
+    const knife = c.combat.find((a) => a.name === "Small knife/straight razor");
+    assert.ok(
+      knife,
+      "small knife/straight razor should split into its own weapon",
     );
-    assert.ok(knife, "small knife/straight razor should split into its own weapon");
     assert.equal(knife!.damage, "1D4");
   });
 
@@ -273,7 +274,8 @@ describe("Masks of Nyarlathotep", () => {
     assert.equal(first.characteristics.CON!.value, 75);
     // Each member gets its own column's values.
     assert.equal(
-      byName(chars, "Bloody Tongue Cultists (Nyc) 2").characteristics.STR!.value,
+      byName(chars, "Bloody Tongue Cultists (Nyc) 2").characteristics.STR!
+        .value,
       50,
     );
   });

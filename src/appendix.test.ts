@@ -16,16 +16,13 @@ import {
 
 describe("parseSpellCosts", () => {
   test("maps mp, san, pow, hp clauses", () => {
-    assert.deepEqual(
-      parseSpellCosts("4 magic points; 1D2 Sanity points"),
-      {
-        magicPoints: "4",
-        sanity: "1d2",
-        power: "",
-        hitPoints: "",
-        others: "",
-      },
-    );
+    assert.deepEqual(parseSpellCosts("4 magic points; 1D2 Sanity points"), {
+      magicPoints: "4",
+      sanity: "1d2",
+      power: "",
+      hitPoints: "",
+      others: "",
+    });
     assert.deepEqual(parseSpellCosts("5 POW; 1D6 Sanity points"), {
       magicPoints: "",
       sanity: "1d6",
@@ -33,13 +30,16 @@ describe("parseSpellCosts", () => {
       hitPoints: "",
       others: "",
     });
-    assert.deepEqual(parseSpellCosts("variable magic points; 1D4 Sanity points"), {
-      magicPoints: "variable",
-      sanity: "1d4",
-      power: "",
-      hitPoints: "",
-      others: "",
-    });
+    assert.deepEqual(
+      parseSpellCosts("variable magic points; 1D4 Sanity points"),
+      {
+        magicPoints: "variable",
+        sanity: "1d4",
+        power: "",
+        hitPoints: "",
+        others: "",
+      },
+    );
   });
 
   test("puts unknown clauses in others", () => {
@@ -273,7 +273,9 @@ describe("artefact helpers", () => {
       true,
     );
     assert.equal(
-      isArtefactWeapon("Both a scrying device and a powerful weapon of attack."),
+      isArtefactWeapon(
+        "Both a scrying device and a powerful weapon of attack.",
+      ),
       true,
     );
   });
@@ -404,7 +406,10 @@ describe("parseAppendixTomes — inline entries (Innsmouth-style)", () => {
     assert.equal(tomes[0].author, "author and translator unknown");
     assert.equal(tomes[0].date, "15th century");
     assert.equal(tomes[0].mythosRating, 30);
-    assert.equal(tomes[0].description, "This bound manuscript is a partial copy of a greater work.");
+    assert.equal(
+      tomes[0].description,
+      "This bound manuscript is a partial copy of a greater work.",
+    );
     assert.equal(tomes[1].author, "Obed Marsh");
     assert.equal(tomes[1].date, "1862 – 1874");
     // The spell list is one sentence; the prose after the last entry stays out.

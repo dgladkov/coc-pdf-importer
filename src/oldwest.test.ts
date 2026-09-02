@@ -50,7 +50,10 @@ describe("parseOldWestOccupations", () => {
       { options: 1, skills: ["Charm", "Fast Talk", "Persuade"] },
     ]);
     assert.equal(artist.personal, 2);
-    assert.equal(artist.personalText, "other skills as personal or era specialties");
+    assert.equal(
+      artist.personalText,
+      "other skills as personal or era specialties",
+    );
     assert.equal(artist.special, "");
   });
 

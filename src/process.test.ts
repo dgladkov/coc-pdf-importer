@@ -169,14 +169,17 @@ describe("parseCocCharacters (unit)", () => {
         "Hatchet (thrown) 40% (20/8), damage 1D6+1, base range 8 yards " +
         "Dart (thrown) 40% (20/8), damage 1D3 Dodge 35% (17/7)",
     );
-    assert.deepEqual(c.combat.map((a) => a.name), [
-      "Fighting",
-      "Tickle",
-      "Blackjack",
-      "Hatchet (thrown)",
-      "Dart (thrown)",
-      "Dodge",
-    ]);
+    assert.deepEqual(
+      c.combat.map((a) => a.name),
+      [
+        "Fighting",
+        "Tickle",
+        "Blackjack",
+        "Hatchet (thrown)",
+        "Dart (thrown)",
+        "Dodge",
+      ],
+    );
   });
 
   test("a %-less / prose Dodge does not leak into the prior attack's damage", () => {
@@ -218,7 +221,10 @@ describe("parseCocCharacters (unit)", () => {
     );
     const garrote = c.combat.find((a) => a.name === "Garrote")!;
     assert.equal(garrote.damage, null);
-    assert.equal(garrote.note, "mnvr. to escape or suffer 1D6 damage per round");
+    assert.equal(
+      garrote.note,
+      "mnvr. to escape or suffer 1D6 damage per round",
+    );
     assert.ok(c.combat.some((a) => a.name === "Dodge"));
   });
 
@@ -263,7 +269,10 @@ describe("parseCocCharacters (unit)", () => {
     );
     const brawl = c.combat.find((a) => a.name === "Brawl")!;
     assert.equal(brawl.damage, "1D3+1D4"); // "or weapon" stripped
-    assert.equal(c.combat.some((a) => /weapon/i.test(a.name)), false);
+    assert.equal(
+      c.combat.some((a) => /weapon/i.test(a.name)),
+      false,
+    );
   });
 
   test("a named 'or weapon' becomes its own capitalized combat entry", () => {
@@ -289,9 +298,30 @@ describe("parseCocCharacters (unit)", () => {
         "Brawl 70% (35/14), damage 1D3+1D4, cudgel 1D6+1D4, or big club 1D8+1D4 Dodge 25% (12/5)",
     );
     assert.deepEqual(c.combat.slice(0, 3), [
-      { name: "Brawl", value: 70, half: 35, fifth: 14, damage: "1D3+1D4", note: null },
-      { name: "Cudgel", value: 70, half: 35, fifth: 14, damage: "1D6+1D4", note: null },
-      { name: "Big club", value: 70, half: 35, fifth: 14, damage: "1D8+1D4", note: null },
+      {
+        name: "Brawl",
+        value: 70,
+        half: 35,
+        fifth: 14,
+        damage: "1D3+1D4",
+        note: null,
+      },
+      {
+        name: "Cudgel",
+        value: 70,
+        half: 35,
+        fifth: 14,
+        damage: "1D6+1D4",
+        note: null,
+      },
+      {
+        name: "Big club",
+        value: 70,
+        half: 35,
+        fifth: 14,
+        damage: "1D8+1D4",
+        note: null,
+      },
     ]);
   });
 
@@ -314,8 +344,22 @@ describe("parseCocCharacters (unit)", () => {
         "Brawl 55% (27/11), damage 1D3, or brass knuckles, 1D3+1 Dodge 25% (12/5)",
     );
     assert.deepEqual(c.combat.slice(0, 2), [
-      { name: "Brawl", value: 55, half: 27, fifth: 11, damage: "1D3", note: null },
-      { name: "Brass knuckles", value: 55, half: 27, fifth: 11, damage: "1D3+1", note: null },
+      {
+        name: "Brawl",
+        value: 55,
+        half: 27,
+        fifth: 11,
+        damage: "1D3",
+        note: null,
+      },
+      {
+        name: "Brass knuckles",
+        value: 55,
+        half: 27,
+        fifth: 11,
+        damage: "1D3+1",
+        note: null,
+      },
     ]);
   });
 
@@ -369,7 +413,10 @@ describe("parseCocCharacters (unit)", () => {
     );
     const f = c.combat.find((a) => a.name === "Fighting")!;
     assert.equal(f.damage, "1D6+1D4");
-    assert.equal(c.combat.some((a) => /weapon/i.test(a.name)), false);
+    assert.equal(
+      c.combat.some((a) => /weapon/i.test(a.name)),
+      false,
+    );
   });
 
   test("a footnote '*' glued to a skill value does not hide the following attack", () => {
@@ -491,8 +538,12 @@ describe("parseCocCharacters (unit)", () => {
     assert.equal(c.skills["Listen"], 55);
     assert.equal(c.skills["Spot Hidden"], 45);
     // No "Own/Other Language" or bare "Languages" survives.
-    const raw = (k: string) => /^\s*(?:own|other)\s+language|^languages\b/i.test(k);
-    assert.ok(!Object.keys(c.skills).some(raw), "an uncanonicalised language name survives");
+    const raw = (k: string) =>
+      /^\s*(?:own|other)\s+language|^languages\b/i.test(k);
+    assert.ok(
+      !Object.keys(c.skills).some(raw),
+      "an uncanonicalised language name survives",
+    );
   });
 
   test("comma-separated spell list is parsed and markers stripped", () => {
@@ -658,7 +709,9 @@ describe("parseCocCharacters (unit)", () => {
         "DB: 0 Build: 0 Move: 8 MP: 10 Traits: nervous and quick. " +
         "INDEX Backstory . . . . . . . 13 Ill Luck (Spell) . . . . . 158 Treasured Possession . . . 14",
     );
-    assert.deepEqual(c.background, [{ title: "Traits", text: "nervous and quick" }]);
+    assert.deepEqual(c.background, [
+      { title: "Traits", text: "nervous and quick" },
+    ]);
   });
 
   // Font-size runs with page numbers, for the page-based bounds. Body text is
@@ -670,7 +723,14 @@ describe("parseCocCharacters (unit)", () => {
       if (text) text += " ";
       const start = text.length;
       text += r.t;
-      chunks.push({ text: r.t, height: r.h ?? 9, start, end: text.length, newline: true, page: r.p ?? 1 });
+      chunks.push({
+        text: r.t,
+        height: r.h ?? 9,
+        start,
+        end: text.length,
+        newline: true,
+        page: r.p ?? 1,
+      });
     }
     return { text, chunks };
   }
@@ -680,9 +740,20 @@ describe("parseCocCharacters (unit)", () => {
   test("a block's body never runs past the page after its STR line", () => {
     const { text, chunks } = chunked([
       { t: "Jane Doe, 30, clerk", h: 11, p: 2 },
-      { t: STATS + " Combat Brawl 40% (20/8), damage 1D3 Traits: cunning and dangerous.", p: 2 },
-      { t: "The scenario continues on the next page with more about the town.", p: 3 },
-      { t: "Nothing on this later page concerns her at all; it is another chapter entirely.", p: 5 },
+      {
+        t:
+          STATS +
+          " Combat Brawl 40% (20/8), damage 1D3 Traits: cunning and dangerous.",
+        p: 2,
+      },
+      {
+        t: "The scenario continues on the next page with more about the town.",
+        p: 3,
+      },
+      {
+        t: "Nothing on this later page concerns her at all; it is another chapter entirely.",
+        p: 5,
+      },
       { t: "Bob Roe, 40, farmer", h: 11, p: 8 },
       { t: STATS + " Combat Brawl 30% (15/6), damage 1D3", p: 8 },
     ]);
@@ -695,11 +766,21 @@ describe("parseCocCharacters (unit)", () => {
 
   test("a heading is searched on the STR page and the one before only; a tall title there names the block", () => {
     const { text, chunks } = chunked([
-      { t: "With thanks to John D. Rateliff, and Dean Engelhardt. Thanks to all of the backers.", p: 1 },
-      { t: "Pages of rules text follow, none of it about anyone in particular.", p: 3 },
+      {
+        t: "With thanks to John D. Rateliff, and Dean Engelhardt. Thanks to all of the backers.",
+        p: 1,
+      },
+      {
+        t: "Pages of rules text follow, none of it about anyone in particular.",
+        p: 3,
+      },
       { t: "AVERAGE MOOK", h: 17, p: 5 },
-      { t: "STR 40 CON 50 SIZ 50 DEX 45 INT 30 APP 30 POW 30 EDU 40 SAN 30 HP 10 DB: 0 Build: 0 Move: 7 MP: 6 " +
-          "Brawl 35% (17/7), damage 1D3 Dodge 25% (12/5) Skills: none.", p: 5 },
+      {
+        t:
+          "STR 40 CON 50 SIZ 50 DEX 45 INT 30 APP 30 POW 30 EDU 40 SAN 30 HP 10 DB: 0 Build: 0 Move: 7 MP: 6 " +
+          "Brawl 35% (17/7), damage 1D3 Dodge 25% (12/5) Skills: none.",
+        p: 5,
+      },
       { t: "Jane Doe, 30, clerk", h: 11, p: 9 },
       { t: STATS + " Combat Brawl 40% (20/8), damage 1D3", p: 9 },
     ]);
@@ -718,14 +799,20 @@ describe("parseCocCharacters (unit)", () => {
     );
     assert.equal(c.name, "Victor Obrecht");
     assert.equal(c.characteristics.HP!.value, 13);
-    assert.deepEqual(c.derived, { DB: "0", Build: 0, Move: 6, MP: 12, Luck: null });
+    assert.deepEqual(c.derived, {
+      DB: "0",
+      Build: 0,
+      Move: 6,
+      MP: 12,
+      Luck: null,
+    });
     assert.equal(c.skills["Navigate (Innsmouth)"], 30);
     assert.equal(c.skills["Persuade"], 45);
   });
 
   test("a sidebar's list label and bullet glyph are not part of a name", () => {
     const [c] = parseCocCharacters(
-      'Notable Folk M Alice Throckmorton, 60, human, a retired local. M George, deep one, her husband STR 80 CON 60 ' +
+      "Notable Folk M Alice Throckmorton, 60, human, a retired local. M George, deep one, her husband STR 80 CON 60 " +
         "SIZ 55 DEX 50 INT 60 APP 40 POW 55 EDU 50 SAN 50 HP 11 DB: +1D4 Build: 1 Move: 6 MP: 11",
     );
     assert.equal(c.name, "Alice Throckmorton");
@@ -738,7 +825,10 @@ describe("parseCocCharacters (unit)", () => {
       { t: 'Richard "Rich"', h: 16, p: 3 },
       { t: "Gorton", h: 16, p: 3 },
       { t: "age 56, hateful father", p: 3 },
-      { t: "STR 65 CON 60 SIZ 70 DEX 50 INT 55 APP 30 POW 50 EDU 40 SAN 45 HP 13 DB +1D4 Build 1 Move 7 MP 10 Combat Brawl 50% (25/10), damage 1D3", p: 3 },
+      {
+        t: "STR 65 CON 60 SIZ 70 DEX 50 INT 55 APP 30 POW 50 EDU 40 SAN 45 HP 13 DB +1D4 Build 1 Move 7 MP 10 Combat Brawl 50% (25/10), damage 1D3",
+        p: 3,
+      },
       { t: "Jane Doe, 30, clerk", h: 11, p: 5 },
       { t: STATS + " Combat Brawl 40% (20/8), damage 1D3", p: 5 },
     ]);
@@ -754,9 +844,15 @@ describe("parseCocCharacters (unit)", () => {
       { t: "Jane Doe, 30, clerk", h: 11, p: 2 },
       { t: STATS + " Combat Brawl 40% (20/8), damage 1D3", p: 2 },
       { t: "Profiles: Innsmouth Humans", h: 16, p: 4 },
-      line("STR 50 APP 50 CON 50 POW 60 SIZ 45 EDU 45 DEX 70 SAN 60 INT 70 HP 11 DB 0 Build 0 Move 8 MP 12"),
-      line("STR 40 APP 50 CON 55 POW 75 SIZ 55 EDU 85 DEX 55 SAN 75 INT 80 HP 11 DB 0 Build 0 Move 8 MP 15"),
-      line("STR 40 APP 55 CON 60 POW 50 SIZ 55 EDU 55 DEX 55 SAN 50 INT 65 HP 15 DB +1D4 Build 1 Move 7 MP 10"),
+      line(
+        "STR 50 APP 50 CON 50 POW 60 SIZ 45 EDU 45 DEX 70 SAN 60 INT 70 HP 11 DB 0 Build 0 Move 8 MP 12",
+      ),
+      line(
+        "STR 40 APP 50 CON 55 POW 75 SIZ 55 EDU 85 DEX 55 SAN 75 INT 80 HP 11 DB 0 Build 0 Move 8 MP 15",
+      ),
+      line(
+        "STR 40 APP 55 CON 60 POW 50 SIZ 55 EDU 55 DEX 55 SAN 50 INT 65 HP 15 DB +1D4 Build 1 Move 7 MP 10",
+      ),
       { t: "Bob Roe, 40, farmer", h: 11, p: 7 },
       { t: STATS + " Combat Brawl 30% (15/6), damage 1D3", p: 7 },
     ]);
@@ -822,7 +918,9 @@ describe("parseCocCharacters (unit)", () => {
 
   test("'Fighting Brawl NN%' is read as the Brawl attack", () => {
     const [c] = parseCocCharacters(
-      "Jane Doe, 30, clerk " + STATS + " Combat Attacks per round: 1 Fighting Brawl 65% (32/13), damage 1D3+1D4 Dodge 35% (17/7)",
+      "Jane Doe, 30, clerk " +
+        STATS +
+        " Combat Attacks per round: 1 Fighting Brawl 65% (32/13), damage 1D3+1D4 Dodge 35% (17/7)",
     );
     assert.equal(c.combat[0].name, "Brawl");
     assert.equal(c.combat[0].value, 65);
@@ -830,7 +928,9 @@ describe("parseCocCharacters (unit)", () => {
 
   test("a block's Pulp Combat / Pulp Talents sections become its pulp variant", () => {
     const [c] = parseCocCharacters(
-      "Jane Doe, 30, clerk " + STATS + " Luck: 80 " +
+      "Jane Doe, 30, clerk " +
+        STATS +
+        " Luck: 80 " +
         "Combat Attacks per round: 1 Brawl 60% (30/12), damage 1D3+1D4 or weapon .45 revolver 60% (30/12), damage 1D10+2 Dodge 50% (25/10) " +
         "Pulp Combat Brawl 80% (40/16), damage 1D3+1D4 or weapon .45 revolver 80% (40/16), damage 1D10+2 Dodge 60% (30/12) " +
         "Pulp Talents Alert: never surprised in combat. Tough Guy: soaks up damage, may spend 10 Luck points to shrug off up to 5 hit points worth of damage taken in one combat round. " +
@@ -842,11 +942,19 @@ describe("parseCocCharacters (unit)", () => {
     assert.equal(c.skills["Charm"], 45);
     assert.deepEqual(
       c.pulp!.combat.map((a) => [a.name, a.value]),
-      [["Brawl", 80], [".45 revolver", 80], ["Dodge", 60]],
+      [
+        ["Brawl", 80],
+        [".45 revolver", 80],
+        ["Dodge", 60],
+      ],
     );
     assert.deepEqual(c.pulp!.talents, [
       { name: "Alert", description: "Never surprised in combat" },
-      { name: "Tough Guy", description: "Soaks up damage, may spend 10 Luck points to shrug off up to 5 hit points worth of damage taken in one combat round" },
+      {
+        name: "Tough Guy",
+        description:
+          "Soaks up damage, may spend 10 Luck points to shrug off up to 5 hit points worth of damage taken in one combat round",
+      },
       { name: "Psychic Power (Divination)", description: "Divination 60%" },
     ]);
     assert.equal(c.pulp!.hp, null);
@@ -854,7 +962,9 @@ describe("parseCocCharacters (unit)", () => {
 
   test("a block without pulp sections has no pulp field", () => {
     const [c] = parseCocCharacters(
-      "Jane Doe, 30, clerk " + STATS + " Combat Brawl 40% (20/8), damage 1D3 Skills Charm 45%.",
+      "Jane Doe, 30, clerk " +
+        STATS +
+        " Combat Brawl 40% (20/8), damage 1D3 Skills Charm 45%.",
     );
     assert.equal("pulp" in c, false);
   });
@@ -874,21 +984,37 @@ describe("parseCocCharacters (unit)", () => {
       c.pulp!.talents.map((t) => t.name),
       ["Fleet Footed", "Quick Draw"],
     );
-    assert.equal(c.pulp!.talents[1].description, "Does not need to have their firearm readied to gain +50 DEX for combat");
+    assert.equal(
+      c.pulp!.talents[1].description,
+      "Does not need to have their firearm readied to gain +50 DEX for combat",
+    );
     // The box's stray "Tough Guy" prose does not become a combat entry.
-    assert.deepEqual(c.combat.map((a) => a.name), ["Brawl", "Dodge"]);
+    assert.deepEqual(
+      c.combat.map((a) => a.name),
+      ["Brawl", "Dodge"],
+    );
   });
 
   test("Two-Headed Serpent's parenthesised talents, two of them separated by ';'", () => {
     const [c] = parseCocCharacters(
-      "Jane Doe, 30, clerk " + STATS + " Combat Brawl 40% (20/8), damage 1D3 Skills Climb 40%. " +
+      "Jane Doe, 30, clerk " +
+        STATS +
+        " Combat Brawl 40% (20/8), damage 1D3 Skills Climb 40%. " +
         "Pulp Talents Rapid Attack (may spend 10 Luck points to gain one further attack in a single combat round); " +
         "F leet Footed (may spend 10 Luck to avoid being outnumbered (e.g. by two or more) in melee combat) " +
         "Armor: 1-point scales. Spells: Contact Yig.",
     );
     assert.deepEqual(c.pulp!.talents, [
-      { name: "Rapid Attack", description: "May spend 10 Luck points to gain one further attack in a single combat round" },
-      { name: "Fleet Footed", description: "May spend 10 Luck to avoid being outnumbered (e.g. by two or more) in melee combat" },
+      {
+        name: "Rapid Attack",
+        description:
+          "May spend 10 Luck points to gain one further attack in a single combat round",
+      },
+      {
+        name: "Fleet Footed",
+        description:
+          "May spend 10 Luck to avoid being outnumbered (e.g. by two or more) in melee combat",
+      },
     ]);
     assert.equal(c.armor, "1-point scales");
   });
@@ -902,9 +1028,21 @@ describe("parseCocCharacters (unit)", () => {
         "M Strong Willed: spend 10 Luck points to gain one bonus die when making POW rolls. 611 FULLER RESIDENCE A house.",
     );
     assert.deepEqual(c.pulp!.talents, [
-      { name: "Hardened", description: "Ignores Sanity loss from viewing horrific injuries or the deceased" },
-      { name: "Resourceful", description: "Always has what's needed at hand; spend 10 Luck points to find a useful piece of equipment or tool" },
-      { name: "Strong Willed", description: "Spend 10 Luck points to gain one bonus die when making POW rolls" },
+      {
+        name: "Hardened",
+        description:
+          "Ignores Sanity loss from viewing horrific injuries or the deceased",
+      },
+      {
+        name: "Resourceful",
+        description:
+          "Always has what's needed at hand; spend 10 Luck points to find a useful piece of equipment or tool",
+      },
+      {
+        name: "Strong Willed",
+        description:
+          "Spend 10 Luck points to gain one bonus die when making POW rolls",
+      },
     ]);
     assert.equal(c.sanityLoss, null);
   });
@@ -928,10 +1066,16 @@ describe("parseCocCharacters (unit)", () => {
     const [ann, bob] = cs;
     assert.equal(ann.pulp!.hp, 29);
     assert.equal(ann.pulp!.luck, 60);
-    assert.deepEqual(ann.pulp!.talents.map((t) => t.name), ["Fleet Footed", "Night Vision"]);
+    assert.deepEqual(
+      ann.pulp!.talents.map((t) => t.name),
+      ["Fleet Footed", "Night Vision"],
+    );
     assert.equal(bob.pulp!.hp, 28);
     assert.equal(bob.pulp!.luck, 27);
-    assert.deepEqual(bob.pulp!.talents.map((t) => t.name), ["Heavy Hitter", "Quick Draw"]);
+    assert.deepEqual(
+      bob.pulp!.talents.map((t) => t.name),
+      ["Heavy Hitter", "Quick Draw"],
+    );
   });
 
   test("a base form does not take the pulp sections printed for its Form continuation", () => {
@@ -950,20 +1094,35 @@ describe("parseCocCharacters (unit)", () => {
     assert.equal("pulp" in base, false);
     assert.deepEqual(
       ghoul.pulp!.combat.map((a) => [a.name, a.value]),
-      [["Fighting", 80], ["Dodge", 70]],
+      [
+        ["Fighting", 80],
+        ["Dodge", 70],
+      ],
     );
-    assert.deepEqual(ghoul.pulp!.talents.map((t) => t.name), ["Tough Guy"]);
+    assert.deepEqual(
+      ghoul.pulp!.talents.map((t) => t.name),
+      ["Tough Guy"],
+    );
   });
 
   test("a Psychic Power's form is read from the start of a longer description", () => {
     const [c] = parseCocCharacters(
-      "Jane Doe, 30, clerk " + STATS + " Combat Brawl 40% (20/8), damage 1D3 " +
+      "Jane Doe, 30, clerk " +
+        STATS +
+        " Combat Brawl 40% (20/8), damage 1D3 " +
         "Pulp Talents Psychic Power: Psychometry 70%; sense the emotional connections of inanimate objects. " +
         "Strong Willed: gains a bonus die when making POW rolls. Skills Climb 40%.",
     );
     assert.deepEqual(c.pulp!.talents, [
-      { name: "Psychic Power (Psychometry)", description: "Psychometry 70%; sense the emotional connections of inanimate objects" },
-      { name: "Strong Willed", description: "Gains a bonus die when making POW rolls" },
+      {
+        name: "Psychic Power (Psychometry)",
+        description:
+          "Psychometry 70%; sense the emotional connections of inanimate objects",
+      },
+      {
+        name: "Strong Willed",
+        description: "Gains a bonus die when making POW rolls",
+      },
     ]);
   });
 
@@ -1418,7 +1577,10 @@ describe("parseCocCharacters (unit)", () => {
       c.background.map((s) => s.title),
       ["Personal Description", "Traits"],
     );
-    assert.equal(c.background[0].text, "A stooped man with ink-stained fingers");
+    assert.equal(
+      c.background[0].text,
+      "A stooped man with ink-stained fingers",
+    );
   });
 
   // A monster's unbounded body can bleed into rules prose mentioning a heading
@@ -1618,9 +1780,9 @@ describe("parseCocCharacters (unit)", () => {
   test("zigzag STR APP CON characteristic order is recognised", () => {
     const [c] = parseCocCharacters(
       "Tough Hybrid, age 30, EOD agent STR 70 APP 30 CON 60 POW 45 SIZ 55 EDU 50 DEX 70 SAN — INT 50 " +
-      "HP 11 DB +1D4 Build 1 Move 9 MP 9 " +
-      "Combat Brawl 65% (32/13) damage 1D3+DB Dodge 35% (17/7) " +
-      "Skills Climb 50%, Swim 60%.",
+        "HP 11 DB +1D4 Build 1 Move 9 MP 9 " +
+        "Combat Brawl 65% (32/13) damage 1D3+DB Dodge 35% (17/7) " +
+        "Skills Climb 50%, Swim 60%.",
     );
     assert.equal(c.name, "Tough Hybrid");
     assert.equal(c.age, 30);
@@ -1635,11 +1797,11 @@ describe("parseCocCharacters (unit)", () => {
   test("zigzag layout still keeps classic STR CON blocks", () => {
     const cs = parseCocCharacters(
       "Classic Guard, age 40, watchman STR 60 CON 70 SIZ 55 DEX 50 INT 50 APP 45 POW 50 EDU 40 SAN 50 HP 12 " +
-      "DB: 0 Build: 0 Move: 8 MP: 10 Combat Brawl 40% (20/8) damage 1D3 " +
-      "Skills Listen 40%. " +
-      "Zig Agent, age 25, hybrid STR 70 APP 30 CON 60 POW 45 SIZ 55 EDU 50 DEX 70 SAN — INT 50 " +
-      "HP 11 DB 0 Build 0 Move 9 MP 9 Combat Brawl 50% (25/10) damage 1D3 " +
-      "Skills Swim 70%.",
+        "DB: 0 Build: 0 Move: 8 MP: 10 Combat Brawl 40% (20/8) damage 1D3 " +
+        "Skills Listen 40%. " +
+        "Zig Agent, age 25, hybrid STR 70 APP 30 CON 60 POW 45 SIZ 55 EDU 50 DEX 70 SAN — INT 50 " +
+        "HP 11 DB 0 Build 0 Move 9 MP 9 Combat Brawl 50% (25/10) damage 1D3 " +
+        "Skills Swim 70%.",
     );
     assert.equal(cs.length, 2);
     assert.equal(cs[0].characteristics.STR!.value, 60);
@@ -1651,8 +1813,8 @@ describe("parseCocCharacters (unit)", () => {
   test("zigzag accepts EDU ? as a null characteristic", () => {
     const [c] = parseCocCharacters(
       "Funny Sam, age 39, secretive vagrant STR 75 APP 25 CON 85 POW 45 SIZ 85 EDU ? DEX 50 SAN 31 INT 50 " +
-      "HP 17 DB +1D4 Build 1 Move 7 MP 9 Combat Brawl 40% (20/8) damage 1D3 " +
-      "Skills Stealth 50%.",
+        "HP 17 DB +1D4 Build 1 Move 7 MP 9 Combat Brawl 40% (20/8) damage 1D3 " +
+        "Skills Stealth 50%.",
     );
     assert.equal(c.characteristics.EDU!.value, null);
     assert.equal(c.characteristics.EDU!.raw, "?");

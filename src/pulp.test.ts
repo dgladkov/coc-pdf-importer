@@ -33,7 +33,11 @@ describe("parsePulpTalents", () => {
       genTable(5, "COMBAT", [[1, "Quick Jab", "hits first."]]);
     assert.deepEqual(parsePulpTalents(text), [
       { name: "Alpha", category: "physical", description: "Runs fast." },
-      { name: "Big Lift", category: "physical", description: "Lifts heavy things." },
+      {
+        name: "Big Lift",
+        category: "physical",
+        description: "Lifts heavy things.",
+      },
       { name: "Quick Jab", category: "combat", description: "Hits first." },
     ]);
   });
@@ -100,7 +104,9 @@ describe("parsePulpTalents", () => {
 
   test("multi-word names are captured whole", () => {
     const [t] = parsePulpTalents(
-      genTable(6, "MISCELLANEOUS", [[1, "Master of Many Things", "is versatile."]]),
+      genTable(6, "MISCELLANEOUS", [
+        [1, "Master of Many Things", "is versatile."],
+      ]),
     );
     assert.equal(t.name, "Master of Many Things");
   });
@@ -116,9 +122,17 @@ describe("parsePulpTalents", () => {
       "TABLE 6: MISCELLANEOUS TALENTS Miscellaneous Talent " +
       "Lucky: regains extra Luck points.";
     assert.deepEqual(parsePulpTalents(text), [
-      { name: "Endurance", category: "physical", description: "Gains a bonus die on CON rolls." },
+      {
+        name: "Endurance",
+        category: "physical",
+        description: "Gains a bonus die on CON rolls.",
+      },
       { name: "Tough", category: "physical", description: "Soaks up damage." },
-      { name: "Lucky", category: "miscellaneous", description: "Regains extra Luck points." },
+      {
+        name: "Lucky",
+        category: "miscellaneous",
+        description: "Regains extra Luck points.",
+      },
     ]);
   });
 
@@ -150,7 +164,11 @@ describe("parsePulpTalents", () => {
     // table's rows end by numbering, so all ten survive intact.
     const rows: [number, string, string][] = [];
     for (let r = 1; r <= 10; r++)
-      rows.push([r, `Talent ${"ABCDEFGHIJ"[r - 1]}`, "does something quite useful in play ".repeat(6).trim() + "."]);
+      rows.push([
+        r,
+        `Talent ${"ABCDEFGHIJ"[r - 1]}`,
+        "does something quite useful in play ".repeat(6).trim() + ".",
+      ]);
     const talents = parsePulpTalents(genTable(6, "MISCELLANEOUS", rows));
     assert.equal(talents.length, 10);
     assert.ok(talents[9].description.endsWith("in play."));
@@ -162,7 +180,10 @@ describe("parsePulpTalents", () => {
       "Alert: never surprised. " +
       "Rapid Attack: may attack again. 32 32 INTRODUCTION 33 T he following items and prices are listed.";
     const t = parsePulpTalents(text);
-    assert.equal(t.find((x) => x.name === "Rapid Attack")!.description, "May attack again.");
+    assert.equal(
+      t.find((x) => x.name === "Rapid Attack")!.description,
+      "May attack again.",
+    );
   });
 });
 
@@ -202,7 +223,10 @@ describe("parsePulpArchetypes", () => {
   });
 
   test("returns [] when the archetype section is absent", () => {
-    assert.deepEqual(parsePulpArchetypes("No archetypes here, just prose."), []);
+    assert.deepEqual(
+      parsePulpArchetypes("No archetypes here, just prose."),
+      [],
+    );
   });
 
   test("tidies '(any)' casing and closes spurious '/ ' and '- ' inside entries", () => {
@@ -242,7 +266,10 @@ describe("parsePulpArchetypes", () => {
       "• Suggested occupations: X. • Talents: any two. • Suggested traits: brave.";
     const [a] = parsePulpArchetypes(t);
     assert.deepEqual(a.skills, ["Climb", "Stealth"]); // clause is not a skill
-    assert.equal(a.description, "Prose here. If the Foo talent is taken, do the thing.");
+    assert.equal(
+      a.description,
+      "Prose here. If the Foo talent is taken, do the thing.",
+    );
   });
 
   test("bounds the traits list at its ending period (no margin/chapter spillover)", () => {

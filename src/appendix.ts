@@ -57,7 +57,6 @@ export interface AppendixArtefact {
   region: string;
 }
 
-
 export type AppendixItem =
   | ({ kind: "spell" } & AppendixSpell)
   | ({ kind: "tome" } & AppendixTome)
@@ -90,31 +89,33 @@ function stripFurniture(s: string): string {
 // Innsmouth (and some fonts) map the bullet glyph to a lone "M". Rewrite known
 // labelled bullets so Cost/Link/Appearance probes stay •-based.
 function normalizeAppendixBullets(s: string): string {
-  return s
-    .replace(/\bM\s+(Cost:)/g, "• $1")
-    .replace(/\bM\s+(Casting time:)/g, "• $1")
-    .replace(/\bM\s+(Appearance in the campaign:)/g, "• $1")
-    .replace(/\bM\s+(Link:)/g, "• $1")
-    .replace(/\bM\s+(Sanity Loss:)/g, "• $1")
-    .replace(/\bM\s+(Cthulhu Mythos:)/g, "• $1")
-    .replace(/\bM\s+(Mythos Rating:)/g, "• $1")
-    .replace(/\bM\s+(Study:)/g, "• $1")
-    .replace(/\bM\s+(Spells:)/g, "• $1")
-    // Innsmouth's tomes list "Suggested Spells:" where the appendices say
-    // "Spells:", and date a work "15 th century" (superscript ordinal as its
-    // own token) with no closing period before the description runs on.
-    .replace(/\bM\s+Suggested Spells:/g, "• Spells:")
-    .replace(
-      /\b(\d{1,2})\s?(st|nd|rd|th)?\s+century(?=\s+(?!BCE\b|CE\b|AD\b)[A-Z])/g,
-      (_m, n: string, s: string | undefined) => `${n}${s ?? "th"} century.`,
-    )
-    // Likewise a "…, by Obed Marsh, 1862 – 1874 Outlines the…" line whose year
-    // runs straight into the description: close it with the period the
-    // appendix shape has.
-    .replace(
-      /(\b(?:by\s+[A-Z][^•]{2,80}?|author(?:\s+and\s+translator)?\s+unknown),\s*(?:c\.\s*)?\d{3,4}(?:\s*[–-]\s*\d{3,4})?)(?=\s+(?!BCE\b|CE\b|AD\b)[A-Z])/g,
-      "$1.",
-    );
+  return (
+    s
+      .replace(/\bM\s+(Cost:)/g, "• $1")
+      .replace(/\bM\s+(Casting time:)/g, "• $1")
+      .replace(/\bM\s+(Appearance in the campaign:)/g, "• $1")
+      .replace(/\bM\s+(Link:)/g, "• $1")
+      .replace(/\bM\s+(Sanity Loss:)/g, "• $1")
+      .replace(/\bM\s+(Cthulhu Mythos:)/g, "• $1")
+      .replace(/\bM\s+(Mythos Rating:)/g, "• $1")
+      .replace(/\bM\s+(Study:)/g, "• $1")
+      .replace(/\bM\s+(Spells:)/g, "• $1")
+      // Innsmouth's tomes list "Suggested Spells:" where the appendices say
+      // "Spells:", and date a work "15 th century" (superscript ordinal as its
+      // own token) with no closing period before the description runs on.
+      .replace(/\bM\s+Suggested Spells:/g, "• Spells:")
+      .replace(
+        /\b(\d{1,2})\s?(st|nd|rd|th)?\s+century(?=\s+(?!BCE\b|CE\b|AD\b)[A-Z])/g,
+        (_m, n: string, s: string | undefined) => `${n}${s ?? "th"} century.`,
+      )
+      // Likewise a "…, by Obed Marsh, 1862 – 1874 Outlines the…" line whose year
+      // runs straight into the description: close it with the period the
+      // appendix shape has.
+      .replace(
+        /(\b(?:by\s+[A-Z][^•]{2,80}?|author(?:\s+and\s+translator)?\s+unknown),\s*(?:c\.\s*)?\d{3,4}(?:\s*[–-]\s*\d{3,4})?)(?=\s+(?!BCE\b|CE\b|AD\b)[A-Z])/g,
+        "$1.",
+      )
+  );
 }
 
 function cleanSpaces(s: string): string {
@@ -138,9 +139,15 @@ function escapeForHtmlLater(s: string): string {
 // content in a short window after each candidate — not a long lookahead that
 // would credit later real sections to an early false marker.
 
-function localScore(text: string, at: number, probe: RegExp, window = 5000): number {
-  return (text.slice(at, at + window).match(new RegExp(probe.source, "gi")) || [])
-    .length;
+function localScore(
+  text: string,
+  at: number,
+  probe: RegExp,
+  window = 5000,
+): number {
+  return (
+    text.slice(at, at + window).match(new RegExp(probe.source, "gi")) || []
+  ).length;
 }
 
 function nextBound(start: number, ...candidates: number[]): number {
@@ -164,15 +171,24 @@ function findArtefactsStart(text: string): number {
   while ((m = re.exec(raw))) {
     const at = m.index;
     if (raw.length >= 20000 && at < lateFrom) continue;
-    const links = localScore(raw, at, /•\s*(?:Link|Appearance in the campaign):/, 8000);
+    const links = localScore(
+      raw,
+      at,
+      /•\s*(?:Link|Appearance in the campaign):/,
+      8000,
+    );
     const regions = localScore(
       raw,
       at,
       /\b(?:PERU|AMERICA|ENGLAND|EGYPT|KENYA|AUSTRALIA|CHINA|OKLAHOMA|BOLIVIA)\b/,
       8000,
     );
-    const named =
-      localScore(raw, at, /Idols from|Jewelry from|Mapulos|Trident or Spear/, 4000);
+    const named = localScore(
+      raw,
+      at,
+      /Idols from|Jewelry from|Mapulos|Trident or Spear/,
+      4000,
+    );
     // Masks/2HS have Link/Appearance; Innsmouth uses named headings.
     if (links < 2 && named < 1 && raw.length >= 20000) continue;
     const score = links * 2 + regions * 3 + named * 5;
@@ -191,15 +207,18 @@ function findArtefactsStart(text: string): number {
 function findTomesStart(text: string): number {
   const raw = normalizeAppendixBullets(text);
   const lateFrom = Math.floor(raw.length * 0.7);
-  const re =
-    /APPENDIX\s+C\b|\bTHE DEEP ONES IN TOMES\b|\bTOMES\b/gi;
+  const re = /APPENDIX\s+C\b|\bTHE DEEP ONES IN TOMES\b|\bTOMES\b/gi;
   let best = -1;
   let bestScore = -1;
   let m: RegExpExecArray | null;
   while ((m = re.exec(raw))) {
     const start = m.index + m[0].length;
     // Skip running headers / prose "tomes" without nearby Sanity Loss stats.
-    if (raw.length >= 20000 && start < lateFrom && !/DEEP ONES IN TOMES/i.test(m[0])) {
+    if (
+      raw.length >= 20000 &&
+      start < lateFrom &&
+      !/DEEP ONES IN TOMES/i.test(m[0])
+    ) {
       continue;
     }
     const spanScore = (
@@ -212,7 +231,10 @@ function findTomesStart(text: string): number {
     if (/DEEP ONES IN TOMES/i.test(m[0])) score += 5;
     if (/APPENDIX\s+C/i.test(m[0])) score += 2;
     if (score < 1) continue;
-    if (score > bestScore || (score === bestScore && (best < 0 || start < best))) {
+    if (
+      score > bestScore ||
+      (score === bestScore && (best < 0 || start < best))
+    ) {
       bestScore = score;
       best = start;
     }
@@ -288,7 +310,8 @@ function sliceAppendix(
     const re = /•\s*Sanity Loss:/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(raw))) {
-      if (lastTomeMeta(raw.slice(Math.max(0, m.index - 2500), m.index))) inline++;
+      if (lastTomeMeta(raw.slice(Math.max(0, m.index - 2500), m.index)))
+        inline++;
     }
     return inline >= 2 ? raw : "";
   }
@@ -333,9 +356,7 @@ export function parseSpellCosts(raw: string): SpellCosts {
       }
       continue;
     }
-    const san = part.match(
-      /^(all remaining|[\dDd+\-]+)\s+Sanity\s+points?$/i,
-    );
+    const san = part.match(/^(all remaining|[\dDd+\-]+)\s+Sanity\s+points?$/i);
     if (san) {
       costs.sanity = normalizeDice(san[1]);
       continue;
@@ -408,7 +429,10 @@ function extractSpellTitle(before: string): string {
   return name;
 }
 
-function parseCastingTime(rest: string): { castingTime: string; length: number } {
+function parseCastingTime(rest: string): {
+  castingTime: string;
+  length: number;
+} {
   const short = rest.match(
     /^((?:instantaneous|\d[\dDd+\-\s/]*(?:minutes?|rounds?|days?|hours?)(?:\s+per\s+[^,]+)?(?:,\s*[^.]+)?|[^\.]{1,80}?))(?=\s+[A-Z])/,
   );
@@ -572,7 +596,10 @@ function parseTomeMetadata(meta: string): {
     // date in the author slot and the later clause as the date.
     if (m[2] && /^(?:c\.\s*)?\d|BCE|century/i.test(author)) {
       date = author;
-      author = cleanSpaces(m[2]).replace(/^author(?:\s+and\s+translator)?\s+/i, "");
+      author = cleanSpaces(m[2]).replace(
+        /^author(?:\s+and\s+translator)?\s+/i,
+        "",
+      );
     }
     // "c. Thirteenth Dynasty Egypt (1786-1633 BCE)." — the closing paren was
     // consumed as the sentence end; restore it.
@@ -714,7 +741,10 @@ function splitTomePreamble(before: string): {
     /\s+•\s*(?:Link|Appearance in the campaign):|\s+Relevance\s*:/i,
   );
   const meta = metaEnd >= 0 ? rest.slice(0, metaEnd) : metaMatch[0];
-  rest = metaEnd >= 0 ? rest.slice(metaEnd) : text.slice(metaMatch.index + metaMatch[0].length);
+  rest =
+    metaEnd >= 0
+      ? rest.slice(metaEnd)
+      : text.slice(metaMatch.index + metaMatch[0].length);
 
   const { language, author, date, physical } = parseTomeMetadata(meta);
 
@@ -964,10 +994,7 @@ export function parseAppendixTomes(text: string): AppendixTome[] {
 
 // --- artefacts -------------------------------------------------------------
 
-const REGION_HEADERS = new RegExp(
-  String.raw`^(?:${REGION_NAMES})$`,
-  "i",
-);
+const REGION_HEADERS = new RegExp(String.raw`^(?:${REGION_NAMES})$`, "i");
 
 const WEAPON_CUES =
   /\b(?:weapon|Fighting\s*\(|deals?\s+\d|\d+D\d+\s*(?:\+\s*\d+)?\s*damage|attack(?:s|ing)?\s+(?:with|as)|damage\s+to\s+(?:supernatural|mundane)|impale)\b/i;
@@ -1007,7 +1034,9 @@ export function parseAppendixArtefacts(text: string): AppendixArtefact[] {
   );
   if (!section) return [];
   const artBanners = [
-    ...section.matchAll(/\b(?:ART[EI]FACTS|DEEP ONE ARTIFACTS|NEW ARTIFACTS)\b/gi),
+    ...section.matchAll(
+      /\b(?:ART[EI]FACTS|DEEP ONE ARTIFACTS|NEW ARTIFACTS)\b/gi,
+    ),
   ];
   if (artBanners.length > 0) {
     const last = artBanners[artBanners.length - 1];
@@ -1084,9 +1113,7 @@ export function parseAppendixArtefacts(text: string): AppendixArtefact[] {
     const chunk = section.slice(s.linkAt, end);
     let link = "";
     let body = chunk;
-    const lm = chunk.match(
-      /•\s*Link:\s*(.+?(?:page\s+\d+[^.]*\.?))/i,
-    );
+    const lm = chunk.match(/•\s*Link:\s*(.+?(?:page\s+\d+[^.]*\.?))/i);
     const am = chunk.match(
       /•\s*Appearance in the campaign:\s*(Chapter\s+\d+:\s*[A-Z][A-Za-z\-]+|\S[^•]{0,80}?)(?=\s+[A-Z][a-z]|\s*$)/i,
     );
@@ -1108,16 +1135,17 @@ export function parseAppendixArtefacts(text: string): AppendixArtefact[] {
     body = body.replace(/\bTABLE:[\s\S]*$/i, "").trim();
     body = body.replace(/\bPULP:[\s\S]*$/i, "").trim();
     // Drop a following region banner that leaked into body.
-    body = body.replace(new RegExp(String.raw`\s+(?:${REGION_NAMES})\s*$`, "i"), "");
+    body = body.replace(
+      new RegExp(String.raw`\s+(?:${REGION_NAMES})\s*$`, "i"),
+      "",
+    );
     const { description, keeper } = splitArtefactBlurb(body);
     if (!keeper || keeper.length < 20) continue;
     artefacts.push({
       name: s.name,
       link,
       description,
-      keeper: link
-        ? cleanSpaces(`Link: ${link} ${keeper}`)
-        : keeper,
+      keeper: link ? cleanSpaces(`Link: ${link} ${keeper}`) : keeper,
       isWeapon: isArtefactWeapon(keeper),
       region: s.region,
     });
@@ -1145,7 +1173,9 @@ function isPlausibleArtefactName(name: string): boolean {
   ) {
     return false;
   }
-  if (/^(?:Mirrors|Artifacts|Artefacts|NEW ARTIFACTS|TECHNOLOGY)$/i.test(name)) {
+  if (
+    /^(?:Mirrors|Artifacts|Artefacts|NEW ARTIFACTS|TECHNOLOGY)$/i.test(name)
+  ) {
     return false;
   }
   if (/^TECHNOLOGY\b/i.test(name)) return false;

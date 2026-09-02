@@ -72,7 +72,11 @@ export class PdfImporterConfig extends foundry.applications.api.HandlebarsApplic
     };
   }
 
-  static async #onSubmit(event: Event, form: HTMLFormElement, formData: object) {
+  static async #onSubmit(
+    event: Event,
+    form: HTMLFormElement,
+    formData: object,
+  ) {
     const input = form.querySelector<HTMLInputElement>('input[name="files"]');
     const files = input?.files;
     if (!files || files.length === 0) {

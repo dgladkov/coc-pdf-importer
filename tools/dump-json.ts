@@ -6,10 +6,10 @@
 //   npm run dump:json -- "<file.pdf>" # just that one (resolved in fixtures/)
 //
 // Reads from fixtures/ (see fixtures/README.md); writes gitignored out/*.json.
-import fs from 'node:fs/promises';
-import process from 'node:process';
-import { processPDF } from '../src/process.ts';
-import { FIXTURES, OUT, pdfInputs, outPath } from './fixtures.ts';
+import fs from "node:fs/promises";
+import process from "node:process";
+import { processPDF } from "../src/process.ts";
+import { FIXTURES, OUT, pdfInputs, outPath } from "./fixtures.ts";
 
 const inputs = await pdfInputs();
 if (inputs.length === 0) {
@@ -20,7 +20,7 @@ if (inputs.length === 0) {
 await fs.mkdir(OUT, { recursive: true });
 
 for (const input of inputs) {
-  const output = outPath(input, '.json');
+  const output = outPath(input, ".json");
   let buf: Buffer;
   try {
     buf = await fs.readFile(input);
@@ -32,8 +32,8 @@ for (const input of inputs) {
   await fs.writeFile(output, JSON.stringify(doc, null, 2));
   console.log(
     output,
-    'actors=' + doc.actors.length,
-    'Unknown=' + doc.actors.filter((c) => c.name === 'Unknown').length,
-    'items=' + doc.items.length
+    "actors=" + doc.actors.length,
+    "Unknown=" + doc.actors.filter((c) => c.name === "Unknown").length,
+    "items=" + doc.items.length,
   );
 }

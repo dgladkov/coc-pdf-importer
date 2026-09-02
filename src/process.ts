@@ -280,7 +280,8 @@ export function parseCocCharacters(
     let bodyEnd = text.length;
     if (i + 1 < headers.length) {
       const next = headers[i + 1];
-      bodyEnd = next.headingStart > strIndex ? next.headingStart : next.headerStart;
+      bodyEnd =
+        next.headingStart > strIndex ? next.headingStart : next.headerStart;
     }
     const strPage = pageOf(strIndex);
     if (strPage > 0) {
@@ -342,13 +343,16 @@ export function parseCocCharacters(
           break;
         }
       }
-    } else if (i + 1 < blocks.length && /\bForm$/i.test(headers[i + 1].header.name)) {
+    } else if (
+      i + 1 < blocks.length &&
+      /\bForm$/i.test(headers[i + 1].header.name)
+    ) {
       // A base form ("Neris") followed by a "... Form" continuation ("Panther
       // Form") keeps its own combat but shares the Skills/Languages/Spells/Sanity
       // printed after the last form, so inherit them from that block's body.
       sharedTail = blocks[i + 1].body;
     }
-      const parsed = parseBlock(
+    const parsed = parseBlock(
       block.body,
       headers[i].window,
       name,
@@ -401,7 +405,8 @@ export function parseCocCharacters(
       !one.sanityLoss;
     const core = one.name.replace(/^the\s+/i, "").toLowerCase();
     const named =
-      core.length > 3 && (group[0].sanityLoss ?? "").toLowerCase().includes(core);
+      core.length > 3 &&
+      (group[0].sanityLoss ?? "").toLowerCase().includes(core);
     if (!bare || !named) continue;
     const src = group[0];
     // The creature's attack profiles sit in the group table's stat-header
@@ -585,7 +590,9 @@ function headerFromChunks(
     .map((c) => c.text)
     .join(" ");
   if (
-    /\b(?:age|appears)\s+\d{1,3}\b|,\s*\d{1,3}\+?\s*,|\bAge:\s*\d/i.test(skipped)
+    /\b(?:age|appears)\s+\d{1,3}\b|,\s*\d{1,3}\+?\s*,|\bAge:\s*\d/i.test(
+      skipped,
+    )
   )
     return null;
 
@@ -732,7 +739,9 @@ function parseNameRun(
   // marker so the whole list is kept out of the name (not just up to the 2nd age).
   // A quoted name's closing quote may follow the comma ('"VIOLET SCANLON," age').
   const ageMatch =
-    /,\s*["']?\s*(?:ages?\s+|appears?\s+)?(\d{1,3})\+?\s*(?:,|$)/i.exec(heading);
+    /,\s*["']?\s*(?:ages?\s+|appears?\s+)?(\d{1,3})\+?\s*(?:,|$)/i.exec(
+      heading,
+    );
   if (ageMatch) {
     return {
       name: clean(heading.slice(0, ageMatch.index)),
@@ -818,7 +827,8 @@ function parseHeader(
   // and 60" list. Prefer the last match carrying that explicit marker: it sits at
   // the start of the list, so the name stops before the whole list (a later bare
   // ", 59," is a continuation, not a new name).
-  const ageRe = /,\s*["']?\s*((?:ages?|appears?)\s+)?(\d{1,3})\+?\s*(?:,|(?=\s*$))/gi;
+  const ageRe =
+    /,\s*["']?\s*((?:ages?|appears?)\s+)?(\d{1,3})\+?\s*(?:,|(?=\s*$))/gi;
 
   let best: RegExpMatchArray | null = null;
   let prefixed: RegExpMatchArray | null = null;
@@ -1442,7 +1452,10 @@ function findLabel(masked: string, label: string, min = 0): number {
     // A label word inside a sentence ("ignores Sanity loss from viewing …") is
     // prose: a heading is never both preceded and followed by a lowercase word
     // (its value may be "none" / "special" / "see …", which are allowed).
-    const afterLabel = masked.slice(m.index + m[0].length, m.index + m[0].length + 12);
+    const afterLabel = masked.slice(
+      m.index + m[0].length,
+      m.index + m[0].length + 12,
+    );
     if (
       /[a-z]\s+$/.test(masked.slice(Math.max(0, m.index - 12), m.index)) &&
       /^\s+(?!none\b|special\b|see\b)[a-z]/.test(afterLabel)
@@ -1450,7 +1463,9 @@ function findLabel(masked: string, label: string, min = 0): number {
       continue;
     if (
       guardLanguages &&
-      /^\s*\d/.test(masked.slice(m.index + m[0].length, m.index + m[0].length + 24))
+      /^\s*\d/.test(
+        masked.slice(m.index + m[0].length, m.index + m[0].length + 24),
+      )
     )
       continue;
     return m.index;
@@ -1677,7 +1692,10 @@ function headingName(sectionHeading: string): {
   const parsed = parseNameRun(sectionHeading);
   if (!parsed || !parsed.name) return { name: "", description: "" };
   // parseNameRun already normalises the letter-spaced colon in the name.
-  return { name: titleFromHeading(parsed.name), description: parsed.description };
+  return {
+    name: titleFromHeading(parsed.name),
+    description: parsed.description,
+  };
 }
 
 // A column label is trustworthy when it is an ordinal ("3"), a table cell code
@@ -1768,8 +1786,9 @@ function titleCaseWord(word: string): string {
   if (TITLE_ACRONYMS.has(word.toUpperCase())) return word.toUpperCase();
   return lower
     .replace(/(^|[-/])([a-z])/g, (_, sep, c) => sep + c.toUpperCase())
-    .replace(/(^|[-/])([ODL]['’])([a-z])/g, (_, sep, p, c) =>
-      sep + p + c.toUpperCase(),
+    .replace(
+      /(^|[-/])([ODL]['’])([a-z])/g,
+      (_, sep, p, c) => sep + p + c.toUpperCase(),
     )
     .replace(/(^|[-/])Mc([a-z])/g, (_, sep, c) => sep + "Mc" + c.toUpperCase());
 }
@@ -1896,10 +1915,17 @@ function skillsSection(source: string, form: string): string {
     const re = labelRe("Skills");
     for (let m = re.exec(masked); m; m = re.exec(masked)) {
       if (!isHeadingCase(m[0])) continue;
-      const qual = /^\s*\(([^)]*)\)/.exec(source.slice(m.index + "Skills".length));
-      if (qual && new RegExp(String.raw`\b${escapeRe(form)}`, "i").test(qual[1])) {
+      const qual = /^\s*\(([^)]*)\)/.exec(
+        source.slice(m.index + "Skills".length),
+      );
+      if (
+        qual &&
+        new RegExp(String.raw`\b${escapeRe(form)}`, "i").test(qual[1])
+      ) {
         const rest = source.slice(m.index + "Skills".length);
-        return clean(rest.slice(0, nextSectionLabel(maskParens(rest), "Skills")));
+        return clean(
+          rest.slice(0, nextSectionLabel(maskParens(rest), "Skills")),
+        );
       }
     }
   }
@@ -1937,7 +1963,11 @@ function sectionBody(
 // Skills/Spells/Languages/Armor still stop the section.
 const COMBAT_SKIP = ["Combat", "Special", "Powers", "Sanity Loss"];
 function combatSection(body: string): string {
-  const labelled = sectionBody(body, "Combat", ["Special", "Powers", "Sanity Loss"]);
+  const labelled = sectionBody(body, "Combat", [
+    "Special",
+    "Powers",
+    "Sanity Loss",
+  ]);
   if (labelled) return labelled;
 
   const match = /Attacks\s+per\s+round/i.exec(maskParens(body));
@@ -2011,19 +2041,21 @@ function parseSpells(text: string): string[] {
   const sentenceEnd = stripped.search(/\.\s/);
   const list = sentenceEnd >= 0 ? stripped.slice(0, sentenceEnd) : stripped;
 
-  return list
-    .split(/\s*,\s*/)
-    // drop "see description" markers, then trim any prose that runs off the end
-    // of the last name (page-break bleed into the next creature's description).
-    .map((s) => trimSpellName(clean(s.replace(/[*✝‡†●]/g, ""))))
-    .filter(
-      (s) =>
-        s.length > 0 &&
-        /^[A-Z]/.test(s) &&
-        !/^(?:and|or)\b/i.test(s) &&
-        !/^none$/i.test(s) &&
-        !/\bnotes?\b/i.test(s),
-    );
+  return (
+    list
+      .split(/\s*,\s*/)
+      // drop "see description" markers, then trim any prose that runs off the end
+      // of the last name (page-break bleed into the next creature's description).
+      .map((s) => trimSpellName(clean(s.replace(/[*✝‡†●]/g, ""))))
+      .filter(
+        (s) =>
+          s.length > 0 &&
+          /^[A-Z]/.test(s) &&
+          !/^(?:and|or)\b/i.test(s) &&
+          !/^none$/i.test(s) &&
+          !/\bnotes?\b/i.test(s),
+      )
+  );
 }
 
 // The block's Pulp Cthulhu variant from its "Pulp Combat" and "Pulp Talents"
@@ -2083,7 +2115,12 @@ function assignPulpBoxes(
   blocks: { start: number }[],
   parsed: CocCharacter[][],
 ): void {
-  const boxes: { region: number; text: string; hp: number | null; taken: boolean }[] = [];
+  const boxes: {
+    region: number;
+    text: string;
+    hp: number | null;
+    taken: boolean;
+  }[] = [];
   blocks.forEach((block, i) => {
     const end = i + 1 < blocks.length ? blocks[i + 1].start : text.length;
     for (const box of pulpBoxes(text.slice(block.start, end)))
@@ -2116,8 +2153,7 @@ function assignPulpBoxes(
   const matches = (i: number, box: (typeof boxes)[number]): boolean =>
     !claimed.has(i) && box.hp != null && expectedHp(i) === box.hp;
 
-  for (const box of boxes)
-    if (matches(box.region, box)) claim(box.region, box);
+  for (const box of boxes) if (matches(box.region, box)) claim(box.region, box);
   for (const box of boxes) {
     if (box.taken) continue;
     for (const i of [box.region - 1, box.region + 1])
@@ -2153,11 +2189,14 @@ function parsePulpTalentList(text: string): {
     // A box continued in the next column repeats its header mid-list.
     .replace(/\bPulp Modification Pulp Talents\b/g, " ¶ ")
     .replace(/(?:^|\s)M\s+(?=[A-Z])/g, " ¶ ");
-  s = s.replace(/\b(HP|Luck):\s*(\d{1,3})\b\.?/g, (_m, key: string, v: string) => {
-    if (key === "HP") out.hp = Number(v);
-    else out.luck = Number(v);
-    return " ¶ ";
-  });
+  s = s.replace(
+    /\b(HP|Luck):\s*(\d{1,3})\b\.?/g,
+    (_m, key: string, v: string) => {
+      if (key === "HP") out.hp = Number(v);
+      else out.luck = Number(v);
+      return " ¶ ";
+    },
+  );
   // A new entry starts at a bullet break, or after a sentence end where a
   // capitalised name is followed by ":" or "(".
   const parts = s
@@ -2400,7 +2439,12 @@ function parseItems(body: string): string[] {
     const items = splitTopLevel(text)
       // Normalise whitespace, then drop a trailing item's leading "and"
       // ("matches, and four candles").
-      .map((s) => s.replace(/\s+/g, " ").trim().replace(/^and\s+/i, ""))
+      .map((s) =>
+        s
+          .replace(/\s+/g, " ")
+          .trim()
+          .replace(/^and\s+/i, ""),
+      )
       .filter((s) => /[A-Za-z0-9]/.test(s));
     if (items.length) return items;
   }
@@ -2594,7 +2638,9 @@ function splitWeaponAlternatives(entry: CombatEntry): CombatEntry[] {
   // Without one, the remainder is a continuation of the damage formula, not an
   // alternative ("1D3 + damage bonus(1D4)"), and the entry is left untouched.
   const after = m[2].trim();
-  const sep = /^[\s*]*(?:[,;]\s*(?:or\s+|with\s+)?|(?:or|with)\s+)/i.exec(after);
+  const sep = /^[\s*]*(?:[,;]\s*(?:or\s+|with\s+)?|(?:or|with)\s+)/i.exec(
+    after,
+  );
   if (!sep) return [entry];
   const rest = after.slice(sep[0].length);
   if (!rest) return [entry];
@@ -2745,7 +2791,10 @@ function cleanCombatName(value: string): string {
     .trim();
   if (!cleaned) return "";
 
-  const tokens = stripDanglingCloseParen(cleaned).trim().split(" ").filter(Boolean);
+  const tokens = stripDanglingCloseParen(cleaned)
+    .trim()
+    .split(" ")
+    .filter(Boolean);
   const name: string[] = [];
   let depth = 0;
   for (let i = tokens.length - 1; i >= 0; i--) {
@@ -2765,7 +2814,10 @@ function cleanCombatName(value: string): string {
   }
 
   // A leading prose parenthetical can survive the walk ("(target may Dodge) Dodge").
-  const result = name.join(" ").replace(/^(?:\([^)]*\)\s*)+/, "").trim();
+  const result = name
+    .join(" ")
+    .replace(/^(?:\([^)]*\)\s*)+/, "")
+    .trim();
   return result || cleaned;
 }
 
@@ -2883,7 +2935,8 @@ function normalizeLanguageName(name: string): string {
   if (!m) return name;
   const prefix = (m[1] || "").toLowerCase();
   let spec = (m[2] || "").trim();
-  if (!spec) spec = prefix === "own" ? "Own" : prefix === "other" ? "Other" : "Any";
+  if (!spec)
+    spec = prefix === "own" ? "Own" : prefix === "other" ? "Other" : "Any";
   else if (/^any\b|desired/i.test(spec)) spec = "Any";
   return `Language (${spec})`;
 }
@@ -2898,8 +2951,9 @@ function mergeLanguages(skills: Skills, languages: Skills): Skills {
     out[normalizeLanguageName(name)] = value;
   }
   for (const [name, value] of Object.entries(languages)) {
-    out[isLanguageName(name) ? normalizeLanguageName(name) : `Language (${name})`] =
-      value;
+    out[
+      isLanguageName(name) ? normalizeLanguageName(name) : `Language (${name})`
+    ] = value;
   }
   return out;
 }
@@ -2938,16 +2992,18 @@ function normalizeText(text: string): string {
 // followed by a colon) so prose like "damage bonus(1D4)" is left intact.
 // Applied per stat block rather than globally so page offsets stay stable.
 function normalizeLabels(text: string): string {
-  return text
-    .replace(/\bAverage\s+Damage\s+Bonus(?:\s*\(DB\))?(?=\s*:)/gi, "DB")
-    .replace(/\bDamage\s+Bonus(?:\s*\(DB\))?(?=\s*:)/gi, "DB")
-    .replace(/\bAverage\s+Build(?=\s*:)/gi, "Build")
-    .replace(/\bMove\s+Rate(?=\s*:)/gi, "Move")
-    // "Average Move*: 11" (a footnoted average in an animal's stat table).
-    .replace(/\bAverage\s+Move\*?(?=\s*:)/gi, "Move")
-    .replace(/\bAverage\s+Magic\s+Points?(?=\s*:)/gi, "MP")
-    .replace(/\bMagic\s+Points?(?=\s*:)/gi, "MP")
-    .replace(/\bHit\s+Points?(?=\s*:)/gi, "HP");
+  return (
+    text
+      .replace(/\bAverage\s+Damage\s+Bonus(?:\s*\(DB\))?(?=\s*:)/gi, "DB")
+      .replace(/\bDamage\s+Bonus(?:\s*\(DB\))?(?=\s*:)/gi, "DB")
+      .replace(/\bAverage\s+Build(?=\s*:)/gi, "Build")
+      .replace(/\bMove\s+Rate(?=\s*:)/gi, "Move")
+      // "Average Move*: 11" (a footnoted average in an animal's stat table).
+      .replace(/\bAverage\s+Move\*?(?=\s*:)/gi, "Move")
+      .replace(/\bAverage\s+Magic\s+Points?(?=\s*:)/gi, "MP")
+      .replace(/\bMagic\s+Points?(?=\s*:)/gi, "MP")
+      .replace(/\bHit\s+Points?(?=\s*:)/gi, "HP")
+  );
 }
 
 // Tokens that appear in every stat block (often at a non-body font size). When
@@ -3076,7 +3132,8 @@ async function extractPages(data: Uint8Array): Promise<RawItem[][]> {
 // in reading order; no font/height needed).
 function pagesToText(pageItems: RawItem[][]): string {
   let out = "";
-  for (const items of pageItems) out += " " + items.map((it) => it.str).join(" ");
+  for (const items of pageItems)
+    out += " " + items.map((it) => it.str).join(" ");
   return out.replace(/\s+/g, " ").trim();
 }
 
@@ -3147,7 +3204,11 @@ function parseActors(pageItems: RawItem[][]): CocCharacter[] {
     !!prev &&
     (endsWithStatLabel(prev.text) ||
       (isRollFormula(prev.text) && !!prev2 && endsWithStatLabel(prev2.text)));
-  const isFurniture = (run: { text: string; height: number; newline: boolean }) => {
+  const isFurniture = (run: {
+    text: string;
+    height: number;
+    newline: boolean;
+  }) => {
     if (run.height === bodyHeight) return false;
     if (/^[\d ]+$/.test(run.text))
       return run.newline || !(afterStatLabel() || prevWasValue);

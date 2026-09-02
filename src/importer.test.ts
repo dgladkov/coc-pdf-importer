@@ -18,7 +18,15 @@ function chars(values: Record<string, number | null>): Characteristics {
 }
 
 function attack(name: string, over: Partial<CombatEntry> = {}): CombatEntry {
-  return { name, value: 40, half: 20, fifth: 8, damage: "1D4", note: null, ...over };
+  return {
+    name,
+    value: 40,
+    half: 20,
+    fifth: 8,
+    damage: "1D4",
+    note: null,
+    ...over,
+  };
 }
 
 // A minimal compendium weapon document with the given canonical name.
@@ -96,7 +104,13 @@ beforeEach(() => {
   };
   (globalThis as any).Actor = {
     create: async (d: any) => {
-      const a: any = { id: "a" + ++n, ...d, items: [], updates: [], deleted: false };
+      const a: any = {
+        id: "a" + ++n,
+        ...d,
+        items: [],
+        updates: [],
+        deleted: false,
+      };
       a.createEmbeddedDocuments = async (_type: string, docs: any[]) => {
         // Mirror Foundry: assign ids and return the created documents.
         const withIds = docs.map((doc: any) => ({
@@ -121,7 +135,8 @@ afterEach(() => {
     delete (globalThis as any)[k];
 });
 
-const item = (a: any, name: string) => a.items.find((i: any) => i.name === name);
+const item = (a: any, name: string) =>
+  a.items.find((i: any) => i.name === name);
 
 // --- tests -----------------------------------------------------------------
 
@@ -131,8 +146,16 @@ describe("importCharacters — system data", () => {
       [
         makeCharacter({
           characteristics: chars({
-            STR: 60, CON: 55, SIZ: 65, DEX: 50, INT: 70,
-            APP: 45, POW: 40, EDU: 80, SAN: 40, HP: 12,
+            STR: 60,
+            CON: 55,
+            SIZ: 65,
+            DEX: 50,
+            INT: 70,
+            APP: 45,
+            POW: 40,
+            EDU: 80,
+            SAN: 40,
+            HP: 12,
           }),
           derived: { DB: "+1D4", Build: 1, Move: 8, MP: 8, Luck: 55 },
           age: 42,
@@ -392,7 +415,11 @@ describe("importCharacters — items", () => {
 
   test("Dodge is a skill, not a weapon", async () => {
     await importCharacters(
-      [makeCharacter({ combat: [attack("Dodge", { value: 50, damage: null })] })],
+      [
+        makeCharacter({
+          combat: [attack("Dodge", { value: 50, damage: null })],
+        }),
+      ],
       { notify: false },
     );
     const dodge = item(created[0], "Dodge");
@@ -418,7 +445,9 @@ describe("importCharacters — items", () => {
     await importCharacters(
       [
         makeCharacter({
-          combat: [attack("Knife", { damage: "1D4", note: "in <boot> & sheath" })],
+          combat: [
+            attack("Knife", { damage: "1D4", note: "in <boot> & sheath" }),
+          ],
         }),
       ],
       { notify: false },
@@ -431,7 +460,11 @@ describe("importCharacters — items", () => {
 
   test("a custom weapon's backing skill is created and linked by id", async () => {
     await importCharacters(
-      [makeCharacter({ combat: [attack("lightning gun", { value: 55, damage: "2D6" })] })],
+      [
+        makeCharacter({
+          combat: [attack("lightning gun", { value: 55, damage: "2D6" })],
+        }),
+      ],
       { notify: false },
     );
     const a = created[0];
@@ -526,9 +559,15 @@ describe("importCharacters — items", () => {
   });
 
   test("Thompson prefers the core 50-mag weapon, then the wiki fallback", async () => {
-    mockCompendium({ weapons: [weaponDoc("Thompson (50 mag)"), weaponDoc("Thompson")] });
+    mockCompendium({
+      weapons: [weaponDoc("Thompson (50 mag)"), weaponDoc("Thompson")],
+    });
     await importCharacters(
-      [makeCharacter({ combat: [attack("Thompson SMG", { value: 45, damage: "1D10+2" })] })],
+      [
+        makeCharacter({
+          combat: [attack("Thompson SMG", { value: 45, damage: "1D10+2" })],
+        }),
+      ],
       { notify: false },
     );
     const w = created[0].items.find((i: any) => i.type === "weapon");
@@ -538,7 +577,13 @@ describe("importCharacters — items", () => {
     created.length = 0;
     mockCompendium({ weapons: [weaponDoc("Thompson")] }); // only the wiki pack
     await importCharacters(
-      [makeCharacter({ combat: [attack("Thompson submachine gun", { value: 45, damage: "1D10+2" })] })],
+      [
+        makeCharacter({
+          combat: [
+            attack("Thompson submachine gun", { value: 45, damage: "1D10+2" }),
+          ],
+        }),
+      ],
       { notify: false },
     );
     const w2 = created[0].items.find((i: any) => i.type === "weapon");
@@ -643,7 +688,13 @@ describe("importCharacters — items", () => {
     await importCharacters(
       [
         makeCharacter({
-          derived: { DB: "+1D6", Build: null, Move: null, MP: null, Luck: null },
+          derived: {
+            DB: "+1D6",
+            Build: null,
+            Move: null,
+            MP: null,
+            Luck: null,
+          },
           combat: [
             attack("Tentacle", { value: 40, damage: "1D6+1D6" }), // trailing DB -> stripped
             attack("Fist", { value: 40, damage: "1D3+DB" }), // literal +DB -> stripped
@@ -670,7 +721,13 @@ describe("importCharacters — items", () => {
     await importCharacters(
       [
         makeCharacter({
-          derived: { DB: "+1D6", Build: null, Move: null, MP: null, Luck: null },
+          derived: {
+            DB: "+1D6",
+            Build: null,
+            Move: null,
+            MP: null,
+            Luck: null,
+          },
           combat: [
             attack("War boomerang", { value: 40, damage: "1D8+1D3" }), // half of +1D6
             attack("Rock", { value: 40, damage: "1D4+1D6" }), // full DB
@@ -718,25 +775,37 @@ describe("importCharacters — items", () => {
       { notify: false },
     );
     const a = created[0];
-    const thr = a.items.find((i: any) => i.type === "skill" && i.name === "Throw");
+    const thr = a.items.find(
+      (i: any) => i.type === "skill" && i.name === "Throw",
+    );
     const weapon = a.items.find(
       (i: any) => i.type === "weapon" && i.name === "Hatchet (thrown)",
     );
     assert.equal(weapon.system.skill.main.id, thr.id);
     // No redundant per-weapon skill created.
-    assert.ok(!a.items.some((i: any) => /Hatchet/.test(i.name) && i.type === "skill"));
+    assert.ok(
+      !a.items.some((i: any) => /Hatchet/.test(i.name) && i.type === "skill"),
+    );
   });
 
   test("a thrown weapon creates a Throw skill when the actor lacks one", async () => {
     await importCharacters(
-      [makeCharacter({ combat: [attack("Dart (thrown)", { value: 35, damage: "1D4" })] })],
+      [
+        makeCharacter({
+          combat: [attack("Dart (thrown)", { value: 35, damage: "1D4" })],
+        }),
+      ],
       { notify: false },
     );
     const a = created[0];
-    const thr = a.items.find((i: any) => i.type === "skill" && i.name === "Throw");
+    const thr = a.items.find(
+      (i: any) => i.type === "skill" && i.name === "Throw",
+    );
     assert.ok(thr, "Throw skill created");
     assert.equal(thr.system.base, "35");
-    const weapon = a.items.find((i: any) => i.type === "weapon" && i.name === "Dart (thrown)");
+    const weapon = a.items.find(
+      (i: any) => i.type === "weapon" && i.name === "Dart (thrown)",
+    );
     assert.equal(weapon.system.skill.main.id, thr.id);
   });
 
@@ -751,13 +820,17 @@ describe("importCharacters — items", () => {
       { notify: false },
     );
     const a = created[0];
-    const thr = a.items.find((i: any) => i.type === "skill" && i.name === "Throw");
+    const thr = a.items.find(
+      (i: any) => i.type === "skill" && i.name === "Throw",
+    );
     const variant = a.items.find(
       (i: any) => i.type === "skill" && i.name === "Fighting (War boomerang)",
     );
     assert.ok(variant, "per-weapon skill created for the value mismatch");
     assert.equal(variant.system.base, "25");
-    const weapon = a.items.find((i: any) => i.type === "weapon" && i.name === "War boomerang");
+    const weapon = a.items.find(
+      (i: any) => i.type === "weapon" && i.name === "War boomerang",
+    );
     assert.equal(weapon.system.skill.main.id, variant.id);
     assert.notEqual(weapon.system.skill.main.id, thr.id);
   });
@@ -765,14 +838,22 @@ describe("importCharacters — items", () => {
   test("a melee weapon never matches a firearm entry (class-gated)", async () => {
     mockCompendium({ weapons: [weaponDoc(".38 or 9mm Revolver")] });
     await importCharacters(
-      [makeCharacter({ combat: [attack("Short sword", { value: 40, damage: "1D8" })] })],
+      [
+        makeCharacter({
+          combat: [attack("Short sword", { value: 40, damage: "1D8" })],
+        }),
+      ],
       { notify: false },
     );
     // No compendium match -> a custom weapon named "Short sword".
     assert.ok(
-      created[0].items.some((i: any) => i.type === "weapon" && i.name === "Short sword"),
+      created[0].items.some(
+        (i: any) => i.type === "weapon" && i.name === "Short sword",
+      ),
     );
-    assert.ok(!created[0].items.some((i: any) => i.name === ".38 or 9mm Revolver"));
+    assert.ok(
+      !created[0].items.some((i: any) => i.name === ".38 or 9mm Revolver"),
+    );
   });
 
   test("spells become spell items in order", async () => {
@@ -789,7 +870,11 @@ describe("importCharacters — items", () => {
 
   test("carried gear becomes generic item documents (quantity 1)", async () => {
     await importCharacters(
-      [makeCharacter({ items: ["notebook", "ghost hunting kit (string, matches)"] })],
+      [
+        makeCharacter({
+          items: ["notebook", "ghost hunting kit (string, matches)"],
+        }),
+      ],
       { notify: false },
     );
     const gear = created[0].items.filter((i: any) => i.type === "item");
@@ -809,9 +894,7 @@ function mockCompendium(opts: {
   spells?: any[];
 }) {
   const byCoCID = (docs: any[]) =>
-    Object.fromEntries(
-      docs.map((d) => [d.flags.CoC7.cocidFlag.id, d]),
-    );
+    Object.fromEntries(docs.map((d) => [d.flags.CoC7.cocidFlag.id, d]));
   (globalThis as any).game.CoC7 = {
     skillNames: { getList: async () => byCoCID(opts.skills ?? []) },
     cocid: {
@@ -860,7 +943,11 @@ describe("importCharacters — compendium lookup", () => {
             skillName: "Any",
             specialization: "Science",
             base: "1",
-            properties: { special: true, requiresname: true, picknameonly: true },
+            properties: {
+              special: true,
+              requiresname: true,
+              picknameonly: true,
+            },
           },
           flags: { CoC7: { cocidFlag: { id: "i.skill.science-any" } } },
         },
@@ -889,7 +976,11 @@ describe("importCharacters — compendium lookup", () => {
             skillName: "Any",
             specialization: "Science",
             base: "1",
-            properties: { special: true, requiresname: true, picknameonly: true },
+            properties: {
+              special: true,
+              requiresname: true,
+              picknameonly: true,
+            },
           },
           flags: { CoC7: { cocidFlag: { id: "i.skill.science-any" } } },
         },
@@ -900,14 +991,22 @@ describe("importCharacters — compendium lookup", () => {
             skillName: "Any",
             specialization: "Language",
             base: "1",
-            properties: { special: true, requiresname: true, picknameonly: true },
+            properties: {
+              special: true,
+              requiresname: true,
+              picknameonly: true,
+            },
           },
           flags: { CoC7: { cocidFlag: { id: "i.skill.language-other" } } },
         },
       ],
     });
     await importCharacters(
-      [makeCharacter({ skills: { "Science (any)": 40, "Language (Any)": 30 } })],
+      [
+        makeCharacter({
+          skills: { "Science (any)": 40, "Language (Any)": 30 },
+        }),
+      ],
       { notify: false },
     );
     // "(Any)" -> "(None)", with skillName "None" and the prompt flags off, so the
@@ -930,7 +1029,11 @@ describe("importCharacters — compendium lookup", () => {
         {
           name: "Fighting (Brawl)",
           type: "skill",
-          system: { skillName: "Brawl", specialization: "Fighting", base: "25" },
+          system: {
+            skillName: "Brawl",
+            specialization: "Fighting",
+            base: "25",
+          },
           flags: { CoC7: { cocidFlag: { id: "i.skill.fighting-brawl" } } },
         },
       ],
@@ -949,7 +1052,11 @@ describe("importCharacters — compendium lookup", () => {
       ],
     });
     await importCharacters(
-      [makeCharacter({ combat: [attack("Brass Knuckles", { value: 55, damage: "1D3" })] })],
+      [
+        makeCharacter({
+          combat: [attack("Brass Knuckles", { value: 55, damage: "1D3" })],
+        }),
+      ],
       { notify: false },
     );
     const a = created[0];
@@ -984,7 +1091,13 @@ describe("importCharacters — compendium lookup", () => {
   test("a matched weapon takes the book's damage even with trailing prose", async () => {
     mockCompendium({ weapons: [lightningGun()] });
     await importCharacters(
-      [makeCharacter({ combat: [attack("Lightning Gun", { value: 40, damage: "2D8 per charge" })] })],
+      [
+        makeCharacter({
+          combat: [
+            attack("Lightning Gun", { value: 40, damage: "2D8 per charge" }),
+          ],
+        }),
+      ],
       { notify: false },
     );
     const weapon = created[0].items.find(
@@ -997,7 +1110,16 @@ describe("importCharacters — compendium lookup", () => {
   test("a matched weapon with non-formula damage keeps the compendium's", async () => {
     mockCompendium({ weapons: [lightningGun()] });
     await importCharacters(
-      [makeCharacter({ combat: [attack("Lightning Gun", { value: 40, damage: "special (see text)" })] })],
+      [
+        makeCharacter({
+          combat: [
+            attack("Lightning Gun", {
+              value: 40,
+              damage: "special (see text)",
+            }),
+          ],
+        }),
+      ],
       { notify: false },
     );
     const weapon = created[0].items.find(
@@ -1040,12 +1162,18 @@ describe("importCharacters — compendium lookup", () => {
       ],
     });
     await importCharacters(
-      [makeCharacter({ combat: [attack("Lightning Gun", { value: 40, damage: "1D10" })] })],
+      [
+        makeCharacter({
+          combat: [attack("Lightning Gun", { value: 40, damage: "1D10" })],
+        }),
+      ],
       { notify: false },
     );
     const a = created[0];
     assert.ok(
-      a.items.find((i: any) => i.type === "weapon" && i.name === "Lightning Gun"),
+      a.items.find(
+        (i: any) => i.type === "weapon" && i.name === "Lightning Gun",
+      ),
     );
     const skill = a.items.find(
       (i: any) => i.type === "skill" && i.name === "Firearms (Lightning Gun)",
@@ -1055,7 +1183,9 @@ describe("importCharacters — compendium lookup", () => {
     assert.equal(skill.system.base, "40");
     // No generic "(Any)" skill was added (which would pop the dialog).
     assert.ok(
-      !a.items.some((i: any) => i.type === "skill" && i.name === "Firearms (Any)"),
+      !a.items.some(
+        (i: any) => i.type === "skill" && i.name === "Firearms (Any)",
+      ),
     );
   });
 
@@ -1081,7 +1211,12 @@ describe("importCharacters — compendium lookup", () => {
 
   test("skills and spells are CoCID-stamped even without a compendium", async () => {
     await importCharacters(
-      [makeCharacter({ skills: { "Spot Hidden": 40 }, spells: ["Cloud Memory"] })],
+      [
+        makeCharacter({
+          skills: { "Spot Hidden": 40 },
+          spells: ["Cloud Memory"],
+        }),
+      ],
       { notify: false },
     );
     assert.equal(
@@ -1135,7 +1270,9 @@ describe("importCharacters — compendium lookup", () => {
   };
 
   test("the own template is used even when an exact language item exists", async () => {
-    mockCompendium({ skills: [LANG_ITEMS.english, LANG_ITEMS.own, LANG_ITEMS.any] });
+    mockCompendium({
+      skills: [LANG_ITEMS.english, LANG_ITEMS.own, LANG_ITEMS.any],
+    });
     await importCharacters(
       [
         makeCharacter({
@@ -1311,10 +1448,16 @@ describe("importCharacters — pulp variants", () => {
   const pulpCharacter = () =>
     makeCharacter({
       name: "Pulp Hero",
-      combat: [attack("Brawl", { value: 60, half: 30, fifth: 12 }), attack("Dodge", { value: 50, half: 25, fifth: 10, damage: null })],
+      combat: [
+        attack("Brawl", { value: 60, half: 30, fifth: 12 }),
+        attack("Dodge", { value: 50, half: 25, fifth: 10, damage: null }),
+      ],
       pulp: {
         attacksPerRound: null,
-        combat: [attack("Brawl", { value: 80, half: 40, fifth: 16 }), attack("Knife", { value: 70, half: 35, fifth: 14 })],
+        combat: [
+          attack("Brawl", { value: 80, half: 40, fifth: 16 }),
+          attack("Knife", { value: 70, half: 35, fifth: 14 }),
+        ],
         talents: [
           { name: "Alert", description: "Never surprised in combat" },
           { name: "Tough Guy", description: "Soaks up damage" },
@@ -1325,40 +1468,66 @@ describe("importCharacters — pulp variants", () => {
     });
 
   test("a character with pulp sections is imported twice, the variant into '<folder> (Pulp)'", async () => {
-    const result = await importCharacters([makeCharacter({ name: "Plain" }), pulpCharacter()], {
-      folderName: "Book",
-      notify: false,
-    });
+    const result = await importCharacters(
+      [makeCharacter({ name: "Plain" }), pulpCharacter()],
+      {
+        folderName: "Book",
+        notify: false,
+      },
+    );
     assert.equal(result.created, 3);
     assert.equal(result.pulp, 1);
-    assert.deepEqual(folders.map((f) => f.name), ["Book", "Book (Pulp)"]);
+    assert.deepEqual(
+      folders.map((f) => f.name),
+      ["Book", "Book (Pulp)"],
+    );
     const pulpFolder = folders.find((f) => f.name === "Book (Pulp)")!;
     const variants = created.filter((a) => a.folder === pulpFolder.id);
-    assert.deepEqual(variants.map((a) => a.name), ["Pulp Hero"]);
+    assert.deepEqual(
+      variants.map((a) => a.name),
+      ["Pulp Hero"],
+    );
     assert.equal(created.filter((a) => a.folder === folders[0].id).length, 2);
   });
 
   test("no pulp folder is created when no character has pulp sections", async () => {
-    await importCharacters([makeCharacter({ name: "Plain" })], { folderName: "Book", notify: false });
-    assert.deepEqual(folders.map((f) => f.name), ["Book"]);
+    await importCharacters([makeCharacter({ name: "Plain" })], {
+      folderName: "Book",
+      notify: false,
+    });
+    assert.deepEqual(
+      folders.map((f) => f.name),
+      ["Book"],
+    );
   });
 
   test("pulp combat replaces same-named profiles, keeps the others, adds new ones; pulp HP/Luck apply", async () => {
-    await importCharacters([pulpCharacter()], { folderName: "Book", notify: false });
-    const variant = created.find((a) => a.folder === folders.find((f) => f.name === "Book (Pulp)")!.id)!;
+    await importCharacters([pulpCharacter()], {
+      folderName: "Book",
+      notify: false,
+    });
+    const variant = created.find(
+      (a) => a.folder === folders.find((f) => f.name === "Book (Pulp)")!.id,
+    )!;
     const weapons = variant.items.filter((i: any) => i.type === "weapon");
     const byName = Object.fromEntries(weapons.map((w: any) => [w.name, w]));
     assert.ok(byName["Knife"], "pulp-only attack added");
     const skillOf = (name: string) =>
-      variant.items.find((i: any) => i.type === "skill" && new RegExp(name, "i").test(i.name));
+      variant.items.find(
+        (i: any) => i.type === "skill" && new RegExp(name, "i").test(i.name),
+      );
     assert.equal(skillOf("Brawl").system.base, "80");
     assert.equal(skillOf("Dodge").system.base, "50");
     assert.equal(variant.system.attribs.hp.value, 20);
     assert.equal(variant.system.attribs.lck.value, 45);
     // The standard import keeps its own values.
-    const standard = created.find((a) => a.folder === folders.find((f) => f.name === "Book")!.id)!;
+    const standard = created.find(
+      (a) => a.folder === folders.find((f) => f.name === "Book")!.id,
+    )!;
     assert.equal(
-      standard.items.find((i: any) => i.type === "skill" && /Brawl/i.test(i.name)).system.base,
+      standard.items.find(
+        (i: any) => i.type === "skill" && /Brawl/i.test(i.name),
+      ).system.base,
       "60",
     );
     assert.equal(standard.system.attribs.hp, undefined);
@@ -1368,23 +1537,48 @@ describe("importCharacters — pulp variants", () => {
     (globalThis as any).game.items = {
       filter: (p: any) =>
         [
-          { name: "alert", type: "talent", img: "alert.svg", system: { source: "Pulp Cthulhu", type: { combat: true }, description: { value: "Full rules text.", keeper: "GM only" } } },
+          {
+            name: "alert",
+            type: "talent",
+            img: "alert.svg",
+            system: {
+              source: "Pulp Cthulhu",
+              type: { combat: true },
+              description: { value: "Full rules text.", keeper: "GM only" },
+            },
+          },
           { name: "Alert", type: "weapon" },
         ].filter(p),
     };
-    await importCharacters([pulpCharacter()], { folderName: "Book", notify: false });
-    const variant = created.find((a) => a.folder === folders.find((f) => f.name === "Book (Pulp)")!.id)!;
+    await importCharacters([pulpCharacter()], {
+      folderName: "Book",
+      notify: false,
+    });
+    const variant = created.find(
+      (a) => a.folder === folders.find((f) => f.name === "Book (Pulp)")!.id,
+    )!;
     const talents = variant.items.filter((i: any) => i.type === "talent");
-    assert.deepEqual(talents.map((t: any) => t.name), ["alert", "Tough Guy"]);
+    assert.deepEqual(
+      talents.map((t: any) => t.name),
+      ["alert", "Tough Guy"],
+    );
     // The world item keeps its icon, category and keeper notes but reads as the book does.
     assert.equal(talents[0].img, "alert.svg");
     assert.equal(talents[0].system.type.combat, true);
-    assert.equal(talents[0].system.description.value, "Never surprised in combat");
+    assert.equal(
+      talents[0].system.description.value,
+      "Never surprised in combat",
+    );
     assert.equal(talents[0].system.description.keeper, "GM only");
     assert.equal(talents[1].system.description.value, "Soaks up damage"); // inline
     assert.equal(talents[1].system.type.other, true);
     // The standard actor gets no talents.
-    const standard = created.find((a) => a.folder === folders.find((f) => f.name === "Book")!.id)!;
-    assert.equal(standard.items.filter((i: any) => i.type === "talent").length, 0);
+    const standard = created.find(
+      (a) => a.folder === folders.find((f) => f.name === "Book")!.id,
+    )!;
+    assert.equal(
+      standard.items.filter((i: any) => i.type === "talent").length,
+      0,
+    );
   });
 });

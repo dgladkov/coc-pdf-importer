@@ -26,7 +26,13 @@ import type {
 // The talent item's category flags (basic/insane/other exist in the schema but
 // are left false for player talents).
 const TALENT_TYPE_FLAGS = [
-  "physical", "mental", "combat", "miscellaneous", "basic", "insane", "other",
+  "physical",
+  "mental",
+  "combat",
+  "miscellaneous",
+  "basic",
+  "insane",
+  "other",
 ] as const;
 const CORE_CHARS = ["str", "con", "siz", "dex", "app", "int", "pow", "edu"];
 
@@ -250,7 +256,16 @@ function artefactDoc(a: AppendixArtefact, _source: string): any {
 
 // --- Down Darker Trails: occupations, altered/new skills, weapons ----------
 
-const OCCUPATION_CHARS = ["str", "con", "siz", "dex", "app", "int", "pow", "edu"];
+const OCCUPATION_CHARS = [
+  "str",
+  "con",
+  "siz",
+  "dex",
+  "app",
+  "int",
+  "pow",
+  "edu",
+];
 
 // A CoC7 "occupation" item document. Every characteristic slot must be present
 // (the sheet toggles them individually), so the parsed sparse map is expanded
@@ -260,7 +275,11 @@ function occupationDoc(o: OldWestOccupation, source: string): any {
     OCCUPATION_CHARS.map((c) => [
       c,
       o.occupationSkillPoints[c]
-        ? { multiplier: o.occupationSkillPoints[c].multiplier, selected: true, optional: o.occupationSkillPoints[c].optional }
+        ? {
+            multiplier: o.occupationSkillPoints[c].multiplier,
+            selected: true,
+            optional: o.occupationSkillPoints[c].optional,
+          }
         : { multiplier: null, selected: false, optional: false },
     ]),
   );
@@ -321,9 +340,17 @@ function normalizeSkillBase(base: string): string {
 // The book prints damage with a literal "+DB"/"+half DB" suffix rather than a
 // number (it's the same for every wielder); split it into the CoC7 add-DB
 // flags, matching how the system's own weapons store damage.
-function splitWeaponDamage(raw: string): { damage: string; addb: boolean; ahdb: boolean } {
+function splitWeaponDamage(raw: string): {
+  damage: string;
+  addb: boolean;
+  ahdb: boolean;
+} {
   if (/\+half\s+DB$/i.test(raw)) {
-    return { damage: raw.replace(/\+half\s+DB$/i, ""), addb: false, ahdb: true };
+    return {
+      damage: raw.replace(/\+half\s+DB$/i, ""),
+      addb: false,
+      ahdb: true,
+    };
   }
   if (/\+DB$/i.test(raw)) {
     return { damage: raw.replace(/\+DB$/i, ""), addb: true, ahdb: false };
@@ -334,7 +361,10 @@ function splitWeaponDamage(raw: string): { damage: string; addb: boolean; ahdb: 
 // "1 (3)" -> normal "1", max "3" (fires once without penalty, up to 3 with
 // one); "Full Auto" / "1/4" pass through as-is (the system's own uses-per-round
 // field is free text for those cases too).
-function splitUsesPerRound(raw: string): { normal: string; max: string | null } {
+function splitUsesPerRound(raw: string): {
+  normal: string;
+  max: string | null;
+} {
   const m = raw.match(/^(\S+)\s*\((\d+)\)$/);
   return m ? { normal: m[1], max: m[2] } : { normal: raw, max: null };
 }
@@ -357,7 +387,9 @@ function weaponDoc(w: OldWestWeapon, source: string): any {
     w.damage.replace(/\s*\([^)]*\)\s*$/, ""),
   );
   const damageParts = damage.split("/");
-  const { normal: usesNormal, max: usesMax } = splitUsesPerRound(w.usesPerRound);
+  const { normal: usesNormal, max: usesMax } = splitUsesPerRound(
+    w.usesPerRound,
+  );
   return {
     name: w.name,
     type: "weapon",
@@ -368,7 +400,10 @@ function weaponDoc(w: OldWestWeapon, source: string): any {
         alternativ: { name: "", id: "" },
       },
       range: {
-        normal: { value: normalizeRangeValue(w.baseRange), damage: damageParts[0] ?? "" },
+        normal: {
+          value: normalizeRangeValue(w.baseRange),
+          damage: damageParts[0] ?? "",
+        },
         long: { value: "0", damage: damageParts[1] ?? "" },
         extreme: { value: "0", damage: damageParts[2] ?? "" },
       },
