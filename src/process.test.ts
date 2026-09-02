@@ -1399,6 +1399,144 @@ describe("parseCocCharacters (unit)", () => {
     );
   });
 
+  test("a two-column page's HP lines go to the actors whose CON + SIZ they fit", () => {
+    // Innsmouth: both columns' "HP … MP …" lines arrive together after the
+    // second block, in column order. Neil: (55+70)/10 = 12; Dora: (50+55)/10 = 10.
+    const cs = parseCocCharacters(
+      "Neil Garrison age 35, paranoid farm laborer STR 60 APP 55 CON 55 POW 45 SIZ 70 EDU 30 DEX 80 SAN 40 INT 60 " +
+        "M Description: tall and thin. M Traits: paranoid. Skills Climb 50%. COMBAT % damage Fighting 35% (17/7) damage 1D3+1D4 Dodge 40% (20/8) " +
+        "Dora Garrison age 33, paranoid mother STR 35 APP 65 CON 50 POW 40 SIZ 55 EDU 35 DEX 70 SAN 32 INT 60 " +
+        "M Description: bony and thin. M Traits: paranoid. HP 12 DB +1D4 Build 1 Move 8 MP 9 HP 10 DB 0 Build 0 Move 8 MP 8 " +
+        "Skills Climb 35%. COMBAT % damage Fighting 25% (12/5) damage 1D3 Dodge 35% (17/7)",
+    );
+    const [neil, dora] = cs;
+    assert.equal(neil.characteristics.HP!.value, 12);
+    assert.deepEqual([neil.derived.DB, neil.derived.MP], ["+1D4", 9]);
+    assert.equal(dora.characteristics.HP!.value, 10);
+    assert.deepEqual([dora.derived.DB, dora.derived.MP], ["0", 8]);
+    // The HP line closes the description; the other column's line is not hers.
+    assert.equal(
+      dora.background.find((b) => b.title === "Personal Description")!.text,
+      "bony and thin.",
+    );
+  });
+
+  test("an inline tome's 'M Sanity Loss / M Suggested Spells' lines are not the NPC's", () => {
+    const [c] = parseCocCharacters(
+      "Marcus Small age unknown, secret guardian STR 100 APP 10 CON 90 POW 60 SIZ 75 EDU 30 DEX 80 SAN — INT 60 " +
+        "HP 16 DB +1D6 Build 2 Move 9 MP 12 Skills Climb 60%. COMBAT % damage Brawl 80% (40/16) damage 1D3+1D6 Dodge 40% (20/8) " +
+        "Ephraim's Grimoire English, Ephraim Waite, 19th century A handwritten book. M Sanity Loss: 1D8 M Cthulhu Mythos: +3/+7 percentiles " +
+        "M Mythos Rating: 30 M Study: 45 weeks M Suggested Spells: Alter Weather, Bless Blade, Cloud Memory.",
+    );
+    assert.equal(c.name, "Marcus Small");
+    assert.equal(c.age, null);
+    assert.equal(c.description, "secret guardian");
+    assert.equal(c.sanityLoss, null);
+    assert.deepEqual(c.spells, []);
+  });
+
+  test("an ampersand weapon name bounds the previous damage ('Bow & arrows')", () => {
+    const [c] = parseCocCharacters(
+      "Jane Doe, 30, clerk " +
+        STATS +
+        " Combat 16-gauge shotgun (1B) 35% (17/7) damage 2D6+2/1D6+1/1D4 Bow & arrows 32% (16/6) damage 1D6+1D2 Dodge 17% (8/3)",
+    );
+    assert.deepEqual(
+      c.combat.map((a) => [a.name, a.damage]),
+      [
+        ["16-gauge shotgun (1B)", "2D6+2/1D6+1/1D4"],
+        ["Bow & arrows", "1D6+1D2"],
+        ["Dodge", null],
+      ],
+    );
+  });
+
+  test("a heading run names the block when the text path read only its tail or a list entry", () => {
+    const { text, chunks } = chunked([
+      { t: "Bob Roe, 40, farmer", h: 11 },
+      { t: STATS + " Combat Brawl 30% (15/6), damage 1D3 Skills Farming 60%." },
+      { t: "Jane Doe, 30, clerk", h: 11 },
+      { t: STATS + " Combat Brawl 40% (20/8), damage 1D3 Skills Charm 40%." },
+      {
+        t: "Notable Folk M Atlas Hartshorn , 40, hybrid, live-in manservant and husband of Honore.",
+      },
+      { t: '"Florence"', h: 16 },
+      {
+        t:
+          "deep one wife of Jonah Waite " +
+          STATS +
+          " M Description: tall and large. Skills Swim 95%. COMBAT % damage Fighting 60% (30/12) damage 1D6 Dodge 30% (15/6)",
+      },
+      { t: "Rank & File EOD Member", h: 16 },
+      {
+        t:
+          STATS +
+          " Skills Climb 30%. COMBAT % damage Brawl 50% (25/10) damage 1D3 Dodge 25% (12/5)",
+      },
+    ]);
+    const cs = parseCocCharacters(text, chunks);
+    assert.deepEqual(
+      cs.map((c) => [c.name, c.description]),
+      [
+        ["Bob Roe", "farmer"],
+        ["Jane Doe", "clerk"],
+        ["Florence", "deep one wife of Jonah Waite"],
+        ["Rank & File EOD Member", ""],
+      ],
+    );
+  });
+
+  test("a heading run before a block's pre-STR sections gives it its name, age, skills and HP line", () => {
+    const { text, chunks } = chunked([
+      { t: "Jane Doe, 30, clerk", h: 11 },
+      { t: STATS + " Combat Brawl 40% (20/8), damage 1D3 Skills Charm 40%." },
+      { t: "Kermit Allen Rawes", h: 16 },
+      {
+        t:
+          "age 30, book dealer & informer M HP 12 DB +1D4 Build 1 Move 8 MP 14 M Description: stocky. Skills Charm 50%, Occult 65%. " +
+          "STR 65 APP 50 CON 60 POW 70 SIZ 65 EDU 70 DEX 70 SAN — INT 75 COMBAT % damage Fighting 50% (25/10) damage 1D3+1D4 Dodge 35% (17/7)",
+      },
+    ]);
+    const c = parseCocCharacters(text, chunks)[1];
+    assert.equal(c.name, "Kermit Allen Rawes");
+    assert.equal(c.age, 30);
+    assert.equal(c.description, "book dealer & informer");
+    assert.deepEqual(c.skills, { Charm: 50, Occult: 65 });
+    assert.equal(c.characteristics.HP!.value, 12);
+    assert.equal(c.derived.MP, 14);
+    assert.deepEqual(
+      c.combat.map((a) => a.name),
+      ["Fighting", "Dodge"],
+    );
+  });
+
+  test("a profile grid's titled Skills/COMBAT sections are dealt to its numbered rows", () => {
+    const { text, chunks } = chunked([
+      { t: "Bob Roe, 40, farmer", h: 11 },
+      { t: STATS + " Combat Brawl 30% (15/6), damage 1D3 Skills Farming 60%." },
+      {
+        t:
+          "Criminal Skills Climb 70%, Stealth 80%. COMBAT % damage Brawl 65% (32/13) damage 1D3 Dodge 40% (20/8) " +
+          "Doctor Skills First Aid 70%, Medicine 65%. COMBAT % damage Brawl 25% (12/5) damage 1D3 Dodge 27% (13/5)",
+      },
+      { t: "Profiles: Innsmouth Humans", h: 14 },
+      {
+        t:
+          "HP 9 DB 0 Build 0 Move 9 MP 12 STR 50 APP 50 CON 50 POW 60 SIZ 45 EDU 45 DEX 70 SAN 60 INT 70 " +
+          "HP 11 DB 0 Build 0 Move 8 MP 15 STR 40 APP 50 CON 55 POW 75 SIZ 55 EDU 85 DEX 55 SAN 75 INT 80",
+      },
+    ]);
+    const cs = parseCocCharacters(text, chunks);
+    assert.deepEqual(
+      cs.map((c) => c.name),
+      ["Bob Roe", "Innsmouth Humans: Criminal", "Innsmouth Humans: Doctor"],
+    );
+    assert.equal(cs[1].skills["Stealth"], 80);
+    assert.equal(cs[2].combat[0].value, 25);
+    assert.equal(cs[1].characteristics.HP!.value, 9);
+    assert.equal(cs[2].characteristics.HP!.value, 11);
+  });
+
   test("the generic NPC member-name fallback keeps its acronym", () => {
     // A group table with numeric column labels and no recoverable title.
     const chars = parseCocCharacters(

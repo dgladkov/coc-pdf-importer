@@ -68,6 +68,7 @@ export type AppendixItem =
 // section banners. Do NOT strip bare digits — those appear in Cost/Study stats.
 const FURNITURE = [
   /\bAPPENDIX\s+[A-Z]\b/gi,
+  /\bNEW\s+(?:SPELLS|TOMES|ARTIFACTS|ARTEFACTS)\b/g,
   /\b(?:SPELLS|TOMES|ARTIFACTS|ARTEFACTS|TECHNOLOGY)\b/g,
   // 4+ single letters separated by spaces (running header / footer).
   /(?:^|\s)(?:[A-Za-z]\s){4,}[A-Za-z](?=\s|$)/g,
@@ -98,6 +99,13 @@ function normalizeAppendixBullets(s: string): string {
       // applied to it again elsewhere.)
       .replace(/\bNEW ARTIFACTS,\s*TECHNOLOGY,\s*TOMES AND SPELLS\b/g, (m) =>
         " ".repeat(m.length),
+      )
+      // A tome's stat run printed without bullets (Innsmouth's "Secretum
+      // Maris (Revised)": "Sanity Loss: 2D6 Cthulhu Mythos: +3/+8 Mythos
+      // Rating: 33 Study: 16 weeks Suggested Spells: …") gets them.
+      .replace(
+        /(?<![•M]\s{0,3})\bSanity Loss:(\s*\S+\s+)Cthulhu Mythos:(\s*\S+\s+)Mythos Rating:(\s*\d+\s+)Study:(\s*[^•]+?\s+)(Suggested Spells|Spells):/g,
+        "• Sanity Loss:$1• Cthulhu Mythos:$2• Mythos Rating:$3• Study:$4• Spells:",
       )
       .replace(/\bM\s+(Cost:)/g, "• $1")
       .replace(/\bM\s+(Casting time:)/g, "• $1")
@@ -303,7 +311,19 @@ function findSpellsStart(text: string): number {
       best = start;
     }
   }
-  return bestScore >= 1 ? best : -1;
+  if (bestScore < 1) return -1;
+  // A banner can be a running side title printed after the section's first
+  // entries (Innsmouth's "Marine Magic & Artifacts" on page 252, after "Alter
+  // Weather"): step back to the first Cost bullet of the entries just before
+  // it, at the sentence that opens its title.
+  const before = raw.slice(Math.max(0, best - 4000), best);
+  const firstCost = before.search(/•\s*Cost:/);
+  if (firstCost >= 0) {
+    const head = before.slice(0, firstCost);
+    const sentence = head.lastIndexOf(". ");
+    return Math.max(0, best - 4000) + (sentence >= 0 ? sentence + 2 : 0);
+  }
+  return best;
 }
 
 function sliceAppendix(
@@ -468,7 +488,7 @@ function parseCastingTime(rest: string): {
   length: number;
 } {
   const short = rest.match(
-    /^((?:instantaneous|\d[\dDd+\-\s/]*(?:minutes?|rounds?|days?|hours?)(?:\s+per\s+[^,]+)?(?:,\s*[^.]+)?|[^\.]{1,80}?))(?=\s+[A-Z])/,
+    /^((?:instantaneous|\d[\dDd+\-\s/]*(?:minutes?|rounds?|days?|hours?)(?:\s+per\s+[^,.]+)?(?:,\s*[^.,]{1,40}?)?|[^\.]{1,80}?))(?=\s+[A-Z]|\.(?:\s|$))/,
   );
   if (short) {
     return {
@@ -476,7 +496,7 @@ function parseCastingTime(rest: string): {
       length: short[0].length,
     };
   }
-  const timeMatch = rest.match(/^(.+?)(?=\s+[A-Z][a-z]|\s*$)/);
+  const timeMatch = rest.match(/^(.+?)(?=\s+[A-Z][a-z]|\.\s|\s*$)/);
   if (timeMatch) {
     return {
       castingTime: cleanSpaces(timeMatch[1]),
@@ -561,7 +581,10 @@ export function parseAppendixSpells(text: string): AppendixSpell[] {
     // A boxed spell sidebar's own label ("SPELL:") can trail the body when the
     // next sidebar's title is what bounds it; it is not part of the text.
     let description = escapeForHtmlLater(
-      section.slice(a.afterCast, bodyEnd).replace(/\s*\bSPELLS?\s*:\s*$/i, ""),
+      section
+        .slice(a.afterCast, bodyEnd)
+        .replace(/^[\s.,;]+/, "")
+        .replace(/\s*\bSPELLS?\s*:\s*$/i, ""),
     );
     // What follows the last write-up up to the bound is the next page's
     // furniture and heading ("CHAPTER 14", "73 THE DEAD BOARDER"): drop a
@@ -939,7 +962,7 @@ function parseTomeStatBlock(
   let initial = 0;
   let final = 0;
   const mythosPair = window.match(
-    /•\s*Cthulhu Mythos:\s*\+?(\d+)\s*\/\s*\+?(\d+)\s*percentiles?/i,
+    /•\s*Cthulhu Mythos:\s*\+?(\d+)\s*\/\s*\+?(\d+)\s*(?:percentiles?|%)?/i,
   );
   if (mythosPair) {
     initial = Number(mythosPair[1]);

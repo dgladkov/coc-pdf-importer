@@ -251,6 +251,96 @@ export function parseCocCharacters(
           headerStart: sectionHeading.start,
         };
     }
+    const runText = clean(sectionHeading.text);
+    const runUsable =
+      sectionHeading.start >= 0 &&
+      !!runText &&
+      !isFurnitureName(runText) &&
+      !/^spells?\b/i.test(runText);
+    // The text path can read only the tail of a heading run ("Member" of
+    // "Rank & File EOD Member", "Asenath's Mind" of "Ephraim Waite's Body
+    // Possessed by Asenath's Mind"): the run is the name.
+    if (
+      runUsable &&
+      header.name &&
+      header.age == null &&
+      runText.length > header.name.length &&
+      runText.toLowerCase().endsWith(header.name.toLowerCase()) &&
+      header.headerStart - sectionHeading.start >= 0 &&
+      header.headerStart - sectionHeading.start <= 80
+    ) {
+      const titled = headingName(runText);
+      if (titled.name)
+        header = {
+          name: titled.name,
+          age: null,
+          description: titled.description || header.description,
+          headerStart: sectionHeading.start,
+        };
+    }
+    // A name the text path could not read (furniture, prose, or nothing)
+    // comes from the heading run, and the block starts there — so what some
+    // books print between the heading and STR (Innsmouth: the HP line, the
+    // description, the skills) is the block's preTable. An "age N, descriptor"
+    // line right after the run carries the age and descriptor.
+    const statDescription =
+      /\b(?:HP|DB|MP|Sanity loss|Skills|Combat)\b|\d+\s*%/i.test(
+        header.description,
+      );
+    // A "Notable Folk" list entry ("M Atlas Hartshorn , 40, hybrid, …") read
+    // as the heading, with the block's own title run after it.
+    const listItem =
+      (/^(?:Notable Folk\s+)?M\s+/.test(header.name) ||
+        /\bM\s+$/.test(
+          text.slice(Math.max(0, header.headerStart - 4), header.headerStart),
+        )) &&
+      sectionHeading.start > header.headerStart;
+    if (
+      runUsable &&
+      (!header.name ||
+        isFurnitureName(header.name) ||
+        header.weak ||
+        statDescription ||
+        listItem) &&
+      sectionHeading.start !== header.headerStart
+    ) {
+      const titled = headingName(runText);
+      if (titled.name) {
+        const after = text.slice(
+          sectionHeading.start,
+          sectionHeading.start + runText.length + 140,
+        );
+        const ageLine =
+          /\b(?:age\s+)?(\d{1,3}|unknown)\s*,\s*(.{1,80}?)(?=\s+(?:M\s+)?(?:HP|STR)\b)/i.exec(
+            after,
+          );
+        // Or a bare descriptor between the run and STR ('"Florence" deep one
+        // wife of Jonah Waite STR …').
+        const words = runText.split(/\s+/).length;
+        const tail = clean(
+          text
+            .slice(sectionHeading.start, strIndex)
+            .replace(new RegExp(String.raw`^\s*(?:\S+\s+){${words}}`), ""),
+        );
+        const bare =
+          !ageLine &&
+          tail.length > 0 &&
+          tail.length <= 60 &&
+          !/\d|\bM\b/.test(tail)
+            ? tail
+            : "";
+        header = {
+          name: titled.name,
+          age: ageLine && /^\d/.test(ageLine[1]) ? Number(ageLine[1]) : null,
+          description: ageLine
+            ? trimDescription(ageLine[2])
+            : titled.description ||
+              bare ||
+              (statDescription || listItem ? "" : header.description),
+          headerStart: sectionHeading.start,
+        };
+      }
+    }
     return {
       strIndex,
       header,
@@ -398,6 +488,8 @@ export function parseCocCharacters(
     parsedBlocks.push(parsed);
   });
   assignPulpBoxes(text, blocks, parsedBlocks);
+  assignDerivedLines(text, blocks, parsedBlocks);
+  attachProfileSections(text, blocks, parsedBlocks);
 
   // A creature's stat lines can be typeset *after* a group table that follows
   // its prose (the Masks booklet prints "Sample Children of the Sphinx" between
@@ -519,8 +611,8 @@ function cleanActorName(name: string): string {
   // label ("Profiles: Innsmouth Humans"), are not part of the name.
   cleaned = cleaned
     .replace(/^(?:Notable Folk\s+)?M\s+(?=[A-Z"'])/, "")
-    .replace(/^Profiles?:\s*/i, "");
-  cleaned = stripUnpairedQuote(cleaned);
+    .replace(/^(?:Profiles?|Pulp):\s*/i, "");
+  cleaned = stripUnpairedQuote(cleaned).replace(/^["“](.+)["”]$/, "$1");
   // A possessive set as its own run leaves a space before it ("Bill Buckley
   // 's Ghost", "M'Weru 's Bodyguards").
   cleaned = cleaned.replace(/\s+(['’]s)\b/g, "$1");
@@ -791,6 +883,9 @@ function parseNameRun(
   // heading ("Million Favored Ones : The Dead" -> "... Ones: The Dead").
   const heading = joinLetterSpaced(clean(runText))
     .replace(/^Name\s*:?\s*/i, "")
+    // A footnote set on the heading line ("HUGE SHOGGOTH * Rolling and
+    // swimming.") is not part of the name.
+    .replace(/\s\*\s.*$/, "")
     .replace(/\s+:\s*/g, ": ")
     .replace(STAT_TABLE_COLUMN_HEADER, "");
   if (!heading) return null;
@@ -903,7 +998,8 @@ function parseHeader(
   // ", 38, hybrid, ..." form, so whichever candidate sits closest to STR is the
   // heading.
   let bare: RegExpMatchArray | null = null;
-  for (const m of window.matchAll(/\bage\s+(\d{1,3})\s*,\s*/gi)) bare = m;
+  for (const m of window.matchAll(/\bage\s+(\d{1,3}|unknown)\s*,\s*/gi))
+    bare = m;
   if (
     bare &&
     (!best || (bare.index ?? 0) >= (best.index ?? 0) + best[0].length)
@@ -939,7 +1035,7 @@ function parseHeader(
     if (name) {
       return {
         name,
-        age: Number(bare[1]),
+        age: /^\d/.test(bare[1]) ? Number(bare[1]) : null,
         description: trimDescription(
           text.slice(ageAbs + bare[0].length, strIndex),
         ),
@@ -1269,6 +1365,9 @@ function parseBlock(
   // offsets used for name detection stay stable).
   body = normalizeLabels(body);
   body = expandLanguageList(body);
+  // The body as printed, for the background sections: the HP line that
+  // relocateDerivedLine moves into the stat header bounds them where it stood.
+  const printedBody = body;
   body = relocateDerivedLine(body);
 
   // Drop a name recovered from an "average / rolls" column-header row.
@@ -1286,7 +1385,9 @@ function parseBlock(
   // then "Mrs. Smith", or a creature's two forms) instead shares one Combat /
   // Skills / Sanity section printed *after* the last line, supplied here as
   // `sharedTail`. Both are last-resort fallbacks behind the block's own body.
-  const fallback = numCols > 1 ? preTable : "";
+  // (Innsmouth prints a single NPC's description, skills and HP line before
+  // the STR table when the layout calls for it, so single blocks read it too.)
+  const fallback = preTable;
   const bodyCombat = combatSection(body);
   const combatText =
     bodyCombat || combatSection(fallback) || combatSection(sharedTail);
@@ -1332,7 +1433,7 @@ function parseBlock(
   let background: BackgroundSection[] = [];
   let items: string[] = [];
   if (col0.APP?.value != null && col0.EDU?.value != null) {
-    background = parseBackground(body);
+    background = parseBackground(printedBody);
     if (!background.length) background = parseBackground(sharedTail);
     items = parseItems(body);
     if (!items.length) items = parseItems(sharedTail);
@@ -1399,9 +1500,14 @@ function parseBlock(
   // trailing descriptor a reliable group description; otherwise a per-member
   // "description" from the header window is leaked prose and stays dropped.
   let groupDescription = "";
+  const heading = headingName(sectionHeading);
   if (!groupName) {
-    const heading = headingName(sectionHeading);
     groupName = heading.name;
+    groupDescription = heading.description;
+  } else if (
+    heading.name &&
+    heading.name.toLowerCase() === groupName.toLowerCase()
+  ) {
     groupDescription = heading.description;
   }
   // Column labels are member names or ordinals, but letter-spaced PDF text can
@@ -1450,14 +1556,32 @@ function parseBlock(
 // bullets. When the stat header carries no HP, move that line up into the
 // header so it is read as the derived stats and stops corrupting a skill.
 const DERIVED_LINE =
-  /\bHP\s+\d{1,3}\s+DB\s+(?:[+-]?\d*[dD]\d+(?:[+-]\d+)?|[+-]?\d+|-)\s+Build\s+-?\d+\s+Move\s+\d+\s+MP\s+\d+\b/;
+  /\bHP\s+\d{1,3}\*?\s+DB\s+(?:[+-]?\d*[dD]\d+(?:[+-]\d+)?|[+-]?\d+|-)\*?\s+Build\s+-?\d+\*?\s+Move\s+\d+\*{0,2}\s+MP\s+\d+\b/;
+// The HP a block's derived line must show: hit points are (CON + SIZ) / 10.
+function expectedHitPoints(header: string): number | null {
+  const con = /\bCON\s+(\d{1,3})\b/.exec(header);
+  const siz = /\bSIZ\s+(\d{1,3})\b/.exec(header);
+  return con && siz ? Math.floor((Number(con[1]) + Number(siz[1])) / 10) : null;
+}
+function derivedLineHp(line: string): number {
+  return Number(/\bHP\s+(\d{1,3})/.exec(line)![1]);
+}
 function relocateDerivedLine(body: string): string {
   const headerEnd = statHeaderEnd(body);
   const header = body.slice(0, headerEnd);
   if (/\bHP\b/.test(header)) return body;
   const rest = body.slice(headerEnd);
-  const m = DERIVED_LINE.exec(rest);
-  if (!m) return body;
+  // Innsmouth's two-column pages deliver both columns' HP lines together, so
+  // the first line in a body may be the neighbour's: take the one whose HP
+  // is this block's (CON + SIZ) / 10, or none — assignDerivedLines then looks
+  // in the neighbouring blocks.
+  const expected = expectedHitPoints(header);
+  const lines = [...rest.matchAll(new RegExp(DERIVED_LINE.source, "g"))];
+  const m =
+    expected == null
+      ? lines[0]
+      : lines.find((l) => derivedLineHp(l[0]) === expected);
+  if (!m || m.index === undefined) return body;
   return (
     header +
     " " +
@@ -1509,6 +1633,15 @@ function findLabel(masked: string, label: string, min = 0): number {
     if (m.index < min || !isHeadingCase(m[0])) continue;
     const before = masked.slice(Math.max(0, m.index - 6), m.index);
     if (/[•·]\s*$/.test(before)) continue;
+    // An inline tome's stat line ("M Sanity Loss: 1D8 M Cthulhu Mythos: …
+    // M Suggested Spells: …" — Innsmouth's bullet is a lone "M") is not a
+    // section of the block it follows.
+    if (/\bM\s+$/.test(before) && /^(?:spells|sanity loss)$/i.test(label))
+      continue;
+    if (
+      /\bSuggested\s+$/i.test(masked.slice(Math.max(0, m.index - 12), m.index))
+    )
+      continue;
     // "Pulp Combat" / "Pulp Talents" are their own sections, not the "Combat"
     // heading of a block that has none.
     if (/\bPulp\s+$/i.test(before) && !/^pulp/i.test(label)) continue;
@@ -1823,6 +1956,8 @@ const GROUP_NAME_STOP = new Set([
 const TITLE_CONNECTORS = new Set([
   "of",
   "on",
+  "by",
+  "or",
   "the",
   "and",
   "for",
@@ -1842,7 +1977,7 @@ const TITLE_CONNECTORS = new Set([
 ]);
 
 // Tokens that stay upper-case in a title (the generic member-name fallback).
-const TITLE_ACRONYMS = new Set(["NPC"]);
+const TITLE_ACRONYMS = new Set(["NPC", "EOD"]);
 
 // Title-case a single title word, keeping connectors lowercase and capitalising
 // each part of a hyphenated or slashed compound ("life-sucke" -> "Life-Sucke",
@@ -2252,6 +2387,120 @@ function assignPulpBoxes(
   }
 }
 
+// A grid of generic profiles ("Profiles: Innsmouth Humans": four stat rows,
+// numbered as a run) printed after one titled "Skills … COMBAT …" section per
+// row ("Criminal low-end Skills Climb 70% … COMBAT … Dodge 40% (20/8) Doctor
+// Skills …"): when there are as many sections as rows, the sections are the
+// rows', in order — each row takes its title, skills and attacks.
+function attachProfileSections(
+  text: string,
+  blocks: { start: number }[],
+  parsed: CocCharacter[][],
+): void {
+  const sectionRe =
+    /(?<=^|[.)]\s+|\d+\s+)([A-Z][A-Za-z/&'’ -]{1,40}?)\s+Skills\s+(.+?)\s+COMBAT\s+(.+?)(?=\s+[A-Z][A-Za-z/&'’ -]{1,40}\s+Skills\s|\s+Profiles?:|$)/g;
+  for (let i = 0; i < parsed.length; i++) {
+    const first = parsed[i][0];
+    if (parsed[i].length !== 1 || !/\s1$/.test(first.name)) continue;
+    const base = first.name.replace(/\s1$/, "");
+    let count = 1;
+    while (
+      i + count < parsed.length &&
+      parsed[i + count].length === 1 &&
+      parsed[i + count][0].name === `${base} ${count + 1}`
+    )
+      count++;
+    if (count < 2) continue;
+    const members = parsed.slice(i, i + count).map((b) => b[0]);
+    if (members.some((m) => m.combat.length || Object.keys(m.skills).length))
+      continue;
+    const from = Math.max(
+      0,
+      i > 0 ? blocks[i - 1].start : 0,
+      blocks[i].start - 8000,
+    );
+    const region = clean(text.slice(from, blocks[i].start));
+    const sections = [...region.matchAll(sectionRe)];
+    if (sections.length < count) continue;
+    const chosen = sections.slice(-count);
+    members.forEach((m, k) => {
+      const [, rawTitle, skills, combat] = chosen[k];
+      const title = clean(rawTitle).replace(
+        /^(?:Appendix|Chapter)\s+[A-Z0-9]{1,2}\s+/i,
+        "",
+      );
+      m.name = `${base}: ${title}`;
+      m.skills = mergeLanguages(parseKeyedList(skills), {});
+      m.combat = parseCombat(combat);
+    });
+    i += count - 1;
+  }
+}
+
+// A block whose stat table carries no HP line (Innsmouth prints "HP 12 DB +1D4
+// Build 1 Move 8 MP 14" apart from the STR table, and a two-column page
+// delivers both columns' lines together) claims the line, in its own or an
+// adjacent block's text, whose HP is its (CON + SIZ) / 10. A line already
+// serving the block it sits in is not offered to a neighbour.
+function assignDerivedLines(
+  text: string,
+  blocks: { start: number }[],
+  parsed: CocCharacter[][],
+): void {
+  const re = new RegExp(DERIVED_LINE.source, "g");
+  const lines: { region: number; text: string; hp: number; taken: boolean }[] =
+    [];
+  blocks.forEach((block, i) => {
+    const end = i + 1 < blocks.length ? blocks[i + 1].start : text.length;
+    for (const m of text.slice(block.start, end).matchAll(re))
+      lines.push({
+        region: i,
+        text: m[0],
+        hp: derivedLineHp(m[0]),
+        taken: false,
+      });
+  });
+  if (!lines.length) return;
+  const single = (i: number): CocCharacter | null =>
+    i >= 0 && i < parsed.length && parsed[i].length === 1 ? parsed[i][0] : null;
+  const expected = (c: CocCharacter): number | null => {
+    const CON = c.characteristics.CON?.value;
+    const SIZ = c.characteristics.SIZ?.value;
+    return CON != null && SIZ != null ? Math.floor((CON + SIZ) / 10) : null;
+  };
+  const hasDerived = (c: CocCharacter): boolean =>
+    c.derived.Build != null || c.derived.Move != null || c.derived.MP != null;
+  // In block order, each block claims the fitting line nearest to where its
+  // own would be printed: before its STR (the previous region, for a grid row
+  // or a column's second block), in its own text, or after (the next region).
+  // A block whose stat table already fits keeps what it read and only claims
+  // its line so a neighbour cannot; one that read the next row's line (a
+  // profile grid: no section label parts a row from the following HP line)
+  // takes the fitting one instead.
+  for (let i = 0; i < parsed.length; i++) {
+    const c = single(i);
+    if (!c) continue;
+    const want = expected(c);
+    if (want == null) continue;
+    const pick = (r: number) =>
+      lines.find((l) => !l.taken && l.region === r && l.hp === want);
+    const line = pick(i - 1) ?? pick(i) ?? pick(i + 1);
+    if (!line) continue;
+    line.taken = true;
+    if (hasDerived(c) && c.characteristics.HP?.value === want) continue;
+    const cols = tokenizeStatHeader(
+      normalizeLabels(line.text.replace(/\*/g, "")),
+    );
+    const d = derivedForColumn(cols, 0);
+    c.derived = { ...d, Luck: c.derived.Luck ?? d.Luck };
+    c.characteristics.HP = {
+      value: line.hp,
+      raw: String(line.hp),
+      marked: false,
+    };
+  }
+}
+
 // A "Pulp Talents" list. Entries read "Name: description." (Masks), "Name
 // (description)" (Two-Headed Serpent), or — Innsmouth — one "M"-glyph bullet
 // each, mixed with pulp "HP: 20" / "Luck: 45" values. A "Note:" entry is prose,
@@ -2349,7 +2598,21 @@ function balancedParenContent(s: string): { text: string; rest: string } {
 function parseSanityLoss(body: string): string | null {
   // Require a colon so prose mentions ("reduce the Sanity loss to 0/1D3") don't
   // match — only the labelled stat line does.
-  const match = /Sanity\s+Loss\s*:\s*/i.exec(maskParens(body));
+  const masked = maskParens(body);
+  let match: RegExpExecArray | null = null;
+  for (const m of masked.matchAll(/Sanity\s+Loss\s*:\s*/gi)) {
+    // Not an inline tome's stat line ("M Sanity Loss: 1D8 M Cthulhu Mythos: …").
+    if (/\bM\s+$/.test(masked.slice(Math.max(0, m.index - 3), m.index)))
+      continue;
+    if (
+      /^[^.]{0,30}\bCthulhu Mythos\s*:/.test(
+        masked.slice(m.index + m[0].length, m.index + m[0].length + 45),
+      )
+    )
+      continue;
+    match = m as RegExpExecArray;
+    break;
+  }
   if (!match) return null;
 
   const rest = body.slice(match.index + match[0].length);
@@ -2452,15 +2715,20 @@ function parseBackground(body: string): BackgroundSection[] {
     // print variants) or the next core section label, whichever comes first.
     const nextBg = i + 1 < hits.length ? hits[i + 1].start : masked.length;
     const rest = body.slice(textStart);
-    const core = textStart + nextSectionLabel(maskParens(rest));
+    let core = textStart + nextSectionLabel(maskParens(rest));
+    // Innsmouth's "HP 13 DB 0 Build 0 Move 8 MP 10" line closes the block.
+    const hpLine = DERIVED_LINE.exec(rest);
+    if (hpLine) core = Math.min(core, textStart + hpLine.index);
     // Drop bullet markers (these sheets separate the fill-in prompts with "•")
     // and a leading colon ("Personal Description: ...").
     const text = clean(
       body.slice(textStart, Math.min(nextBg, core)).replace(/[•·●⁃|]/g, " "),
     )
       .replace(/^:\s*/, "")
-      // A running header at the foot of the sheet's page ("APPENDIX D").
-      .replace(/\s*\b(?:APPENDIX|CHAPTER)\s+[A-Z0-9]{1,2}\s*$/, "");
+      // A running header at the foot of the sheet's page ("APPENDIX D"), or
+      // the lone "M" bullet that opened the next heading (Innsmouth).
+      .replace(/\s*\b(?:APPENDIX|CHAPTER)\s+[A-Z0-9]{1,2}\s*$/, "")
+      .replace(/\s+M$/, "");
     // Skip a heading whose body is just a bullet or blank (a two-column sheet
     // stacks the headings with their fill-in text in a separate column).
     if (/[A-Za-z]/.test(text)) out.push({ title: hits[i].title, text });
@@ -2642,7 +2910,7 @@ function parseCombat(text: string): CombatEntry[] {
   // Nor a characteristic or "Sanity": prose after a damage ("… 3D10 points of
   // INT per round", "1 point Sanity loss to all who can hear") would otherwise
   // be read as the next attack's name up to a following profile.
-  const attackName = String.raw`${honorific}(?!\d+[dD]\d+\b)(?!DB\b)(?!Combat\b)(?!(?:STR|CON|SIZ|DEX|INT|APP|POW|EDU|SAN|HP|MP|Sanity)\b)\.?[A-Z0-9À-ɏ](?:[A-Za-z0-9 /'"+#*À-ɏ-]|\([^),]*\)|\.\d)*?`;
+  const attackName = String.raw`${honorific}(?!\d+[dD]\d+\b)(?!DB\b)(?!Combat\b)(?!(?:STR|CON|SIZ|DEX|INT|APP|POW|EDU|SAN|HP|MP|Sanity)\b)\.?[A-Z0-9À-ɏ](?:[A-Za-z0-9 /'"+#*&À-ɏ-]|\([^),]*\)|\.\d)*?`;
   // The start of the next attack, used only to bound the damage of this one. An
   // attack profile is a value followed by a "(half/fifth)" or ", damage". The %
   // is optional (some Dodges read "Dodge 27 (13/5)") and a comma may sit before
