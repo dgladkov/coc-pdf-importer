@@ -282,6 +282,17 @@ export function parseCocCharacters(
       const next = headers[i + 1];
       bodyEnd =
         next.headingStart > strIndex ? next.headingStart : next.headerStart;
+      // Not when the name itself sits just before that title run (a pre-gen's
+      // "DERRICK JAMESON," ahead of its "Age 35, …" line): the name is the
+      // next block's, so this body ends before it.
+      if (
+        next.headingStart > next.headerStart &&
+        next.header.name &&
+        clean(text.slice(next.headerStart, next.headingStart))
+          .replace(/[,\s]+$/, "")
+          .toLowerCase() === clean(next.header.name).toLowerCase()
+      )
+        bodyEnd = next.headerStart;
     }
     const strPage = pageOf(strIndex);
     if (strPage > 0) {
@@ -1345,19 +1356,18 @@ function parseBlock(
   );
 
   if (numCols <= 1) {
+    // Large creatures often have a description blurb between their heading
+    // and STR, so no name is found nearby. Fall back to the font-size heading
+    // above the blurb ("Children of the Sphinx", "TYRANISSH, THE DREAMING
+    // SORCERER" — its descriptor kept apart), then to the name in their
+    // Sanity loss line ("... to see the Abomination").
+    const heading = name ? null : headingName(sectionHeading);
     return [
       {
-        // Large creatures often have a description blurb between their heading
-        // and STR, so no name is found nearby. Fall back to the font-size heading
-        // above the blurb ("Children of the Sphinx"), then to the name in their
-        // Sanity loss line ("... to see the Abomination").
         name:
-          name ||
-          titleFromHeading(sectionHeading) ||
-          nameFromSanityLoss(sanityLoss) ||
-          "Unknown",
+          name || heading?.name || nameFromSanityLoss(sanityLoss) || "Unknown",
         age,
-        description,
+        description: description || (heading?.name ? heading.description : ""),
         characteristics: characteristicsForColumn(cols, 0),
         derived: derivedForColumn(cols, 0),
         attacksPerRound,
@@ -1745,10 +1755,14 @@ function headingName(sectionHeading: string): {
 } {
   const parsed = parseNameRun(sectionHeading);
   if (!parsed || !parsed.name) return { name: "", description: "" };
-  // parseNameRun already normalises the letter-spaced colon in the name.
+  // parseNameRun already normalises the letter-spaced colon in the name. An
+  // ALL-CAPS heading's descriptor ("TYRANISSH, THE DREAMING SORCERER") reads
+  // in title case like the name.
   return {
     name: titleFromHeading(parsed.name),
-    description: parsed.description,
+    description: isAllCapsName(parsed.description)
+      ? titleCaseTitle(parsed.description)
+      : parsed.description,
   };
 }
 
@@ -1779,6 +1793,8 @@ function titleFromHeading(heading: string): string {
 function isFurnitureName(name: string): boolean {
   // Innsmouth's pulp-box header is a section label, not a name.
   if (/\bPulp (?:Modification|Combat|Talents)\b/.test(name)) return true;
+  // A running header ("APPENDIX A", "CHAPTER 6") set at title height.
+  if (/^(?:APPENDIX|CHAPTER)\s+[A-Z0-9]{1,2}$/i.test(clean(name))) return true;
   const words = name.split(/[\s(),.]+/).filter(Boolean);
   return (
     words.length > 0 &&
@@ -2441,7 +2457,10 @@ function parseBackground(body: string): BackgroundSection[] {
     // and a leading colon ("Personal Description: ...").
     const text = clean(
       body.slice(textStart, Math.min(nextBg, core)).replace(/[•·●⁃|]/g, " "),
-    ).replace(/^:\s*/, "");
+    )
+      .replace(/^:\s*/, "")
+      // A running header at the foot of the sheet's page ("APPENDIX D").
+      .replace(/\s*\b(?:APPENDIX|CHAPTER)\s+[A-Z0-9]{1,2}\s*$/, "");
     // Skip a heading whose body is just a bullet or blank (a two-column sheet
     // stacks the headings with their fill-in text in a separate column).
     if (/[A-Za-z]/.test(text)) out.push({ title: hits[i].title, text });
@@ -2994,6 +3013,10 @@ function cleanEntryName(raw: string): string {
   const cap = s.search(/[A-Z]/);
   if (cap < 0) return ""; // no capitalised word — prose ("etc", "thus making up")
   if (cap > 0) s = s.slice(cap);
+  // A running header glued before the first skill of a page ("PRE-GENERATED
+  // PLAYER CHARACTERS Mechanical Repair"): two or more ALL-CAPS words ahead of
+  // a mixed-case name are not part of it.
+  s = s.replace(/^(?:[A-Z][A-Z-]+\s+){2,}(?=[A-Z][a-z])/, "");
   const open = (s.match(/\(/g) ?? []).length;
   const close = (s.match(/\)/g) ?? []).length;
   if (open > close) s = clean(s.slice(0, s.lastIndexOf("(")));
@@ -3262,6 +3285,16 @@ function parseActors(pageItems: RawItem[][]): CocCharacter[] {
     page++;
     for (const it of items) {
       const text = normalizeText(it.str);
+      // A period the font could not map ("Dr �   Rafael Gomez") arrives as a
+      // lone replacement character after a title abbreviation; keep the period.
+      if (!text && /^\s*\uFFFD+\s*$/.test(it.str) && !newline) {
+        const last = runs[runs.length - 1];
+        if (
+          last &&
+          /\b(?:Dr|Mr|Mrs|Ms|Prof|St|Lt|Capt|Sgt|Rev)$/.test(last.text)
+        )
+          last.text += ".";
+      }
       if (text) {
         const last = runs[runs.length - 1];
         if (

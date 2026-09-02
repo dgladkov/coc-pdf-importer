@@ -68,7 +68,7 @@ export type AppendixItem =
 // section banners. Do NOT strip bare digits — those appear in Cost/Study stats.
 const FURNITURE = [
   /\bAPPENDIX\s+[A-Z]\b/gi,
-  /\b(?:SPELLS|TOMES|ARTIFACTS|ARTEFACTS)\b/g,
+  /\b(?:SPELLS|TOMES|ARTIFACTS|ARTEFACTS|TECHNOLOGY)\b/g,
   // 4+ single letters separated by spaces (running header / footer).
   /(?:^|\s)(?:[A-Za-z]\s){4,}[A-Za-z](?=\s|$)/g,
   // A page number printed twice at the page head ("631 631"), and Innsmouth's
@@ -91,6 +91,14 @@ function stripFurniture(s: string): string {
 function normalizeAppendixBullets(s: string): string {
   return (
     s
+      // The Two-Headed Serpent's appendix running header names every section
+      // ("NEW ARTIFACTS, TECHNOLOGY, TOMES AND SPELLS" on each page); it is not
+      // where any of them starts.
+      // (Blanked to the same length: section offsets found on this text are
+      // applied to it again elsewhere.)
+      .replace(/\bNEW ARTIFACTS,\s*TECHNOLOGY,\s*TOMES AND SPELLS\b/g, (m) =>
+        " ".repeat(m.length),
+      )
       .replace(/\bM\s+(Cost:)/g, "• $1")
       .replace(/\bM\s+(Casting time:)/g, "• $1")
       .replace(/\bM\s+(Appearance in the campaign:)/g, "• $1")
@@ -169,13 +177,15 @@ function findArtefactsStart(text: string): number {
   let m: RegExpExecArray | null;
   const lateFrom = Math.floor(raw.length * 0.7);
   while ((m = re.exec(raw))) {
+    // A prose cross-reference ("see Appendix C") is not the banner.
+    if (/^Appendix/.test(m[0])) continue;
     const at = m.index;
     if (raw.length >= 20000 && at < lateFrom) continue;
     const links = localScore(
       raw,
       at,
       /•\s*(?:Link|Appearance in the campaign):/,
-      8000,
+      12000,
     );
     const regions = localScore(
       raw,
@@ -200,6 +210,24 @@ function findArtefactsStart(text: string): number {
       }
     }
   }
+  // The scorer favours the banner with the most entries ahead of it, which can
+  // be a running banner one page in; step back to an earlier banner when an
+  // entry (Link / Appearance) lies between it and the winner.
+  if (best >= 0) {
+    re.lastIndex = 0;
+    let m2: RegExpExecArray | null;
+    while ((m2 = re.exec(raw)) && m2.index < best) {
+      if (
+        best - m2.index < 4000 &&
+        /•\s*(?:Link|Appearance in the campaign):/.test(
+          raw.slice(m2.index, best),
+        )
+      ) {
+        best = m2.index;
+        break;
+      }
+    }
+  }
   return best;
 }
 
@@ -212,6 +240,8 @@ function findTomesStart(text: string): number {
   let bestScore = -1;
   let m: RegExpExecArray | null;
   while ((m = re.exec(raw))) {
+    // A prose cross-reference ("see Appendix C") is not the banner.
+    if (/^Appendix/.test(m[0])) continue;
     const start = m.index + m[0].length;
     // Skip running headers / prose "tomes" without nearby Sanity Loss stats.
     if (
@@ -222,7 +252,7 @@ function findTomesStart(text: string): number {
       continue;
     }
     const spanScore = (
-      raw.slice(start, start + 20000).match(/•\s*Sanity Loss:/gi) || []
+      raw.slice(start, start + 20000).match(/•\s*Sanity (?:Loss|Cost):/gi) || []
     ).length;
     // Running headers like "Appendix C 257" mid-prose have no Sanity Loss —
     // never treat them as the tomes appendix opener.
@@ -252,6 +282,8 @@ function findSpellsStart(text: string): number {
   let bestScore = -1;
   let m: RegExpExecArray | null;
   while ((m = re.exec(raw))) {
+    // A prose cross-reference ("see Appendix C") is not the banner.
+    if (/^Appendix/.test(m[0])) continue;
     const start = m.index + m[0].length;
     const isNamed = /NEW SPELLS|Marine Magic\s*&/i.test(m[0]);
     // Cross-refs like "Marine Magic, page 252" are not section starts.
@@ -296,7 +328,7 @@ function sliceAppendix(
     const end = nextBound(tomesStart, artefactsStart, spellsStart);
     const section =
       tomesStart < 0 ? "" : raw.slice(tomesStart, end > 0 ? end : raw.length);
-    if (/•\s*Sanity Loss:/.test(section)) return section;
+    if (/•\s*Sanity (?:Loss|Cost):/.test(section)) return section;
     // No tomes appendix (or only a banner without stat blocks — Innsmouth's
     // "The Deep Ones in Tomes" is a fiction bibliography) — but a book may
     // print appendix-shaped tome entries inline in its chapters (Innsmouth's
@@ -307,9 +339,11 @@ function sliceAppendix(
     // needs its own parser — those bullets mark that shape, so stand down.
     if ((raw.match(/•\s*Language:/g) || []).length >= 2) return "";
     let inline = 0;
-    const re = /•\s*Sanity Loss:/g;
+    const re = /•\s*Sanity (?:Loss|Cost):/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(raw))) {
+      // A prose cross-reference ("see Appendix C") is not the banner.
+      if (/^Appendix/.test(m[0])) continue;
       if (lastTomeMeta(raw.slice(Math.max(0, m.index - 2500), m.index)))
         inline++;
     }
@@ -505,6 +539,7 @@ export function parseAppendixSpells(text: string): AppendixSpell[] {
     const name = extractSpellTitle(before);
     if (!name || name.length < 2) continue;
     let bodyEnd = section.length;
+    let lastEntry = false;
     if (i + 1 < anchors.length) {
       const nextBefore = section.slice(a.afterCast, anchors[i + 1].index);
       const title = extractSpellTitle(nextBefore);
@@ -514,12 +549,27 @@ export function parseAppendixSpells(text: string): AppendixSpell[] {
       } else {
         bodyEnd = anchors[i + 1].index;
       }
+    } else {
+      // The last spell of a book whose spells close the appendix (The
+      // Two-Headed Serpent) is followed by the next appendix's title
+      // ("HYBRIDIZATION"): an ALL-CAPS word of 8+ letters ends the write-up.
+      const tail = section.slice(a.afterCast);
+      const heading = /\s[A-Z][A-Z-]{7,}\b/.exec(tail.slice(80));
+      if (heading) bodyEnd = a.afterCast + 80 + heading.index;
+      lastEntry = true;
     }
     // A boxed spell sidebar's own label ("SPELL:") can trail the body when the
     // next sidebar's title is what bounds it; it is not part of the text.
-    const description = escapeForHtmlLater(
+    let description = escapeForHtmlLater(
       section.slice(a.afterCast, bodyEnd).replace(/\s*\bSPELLS?\s*:\s*$/i, ""),
     );
+    // What follows the last write-up up to the bound is the next page's
+    // furniture and heading ("CHAPTER 14", "73 THE DEAD BOARDER"): drop a
+    // short unterminated fragment after the final sentence.
+    if (lastEntry) {
+      const end = description.search(/[.!?]["”)]?\s+[^.!?]{0,100}$/);
+      if (end >= 0) description = description.slice(0, end + 1).trim();
+    }
     if (/\.$/.test(name) || name.split(/\s+/).length > 12) continue;
     // The last spell in a section has no next title to bound it at, falling
     // back to the section's own end (sliceAppendix, when this is the only
@@ -858,6 +908,19 @@ function findNextTomeTitleIndex(
   return from + meta.index;
 }
 
+// Where the stat bullets an entry's Sanity line belongs to begin: the Serpent
+// shape prints "• Language: … • Cthulhu Mythos (…): … • Mythos Rating: … •
+// Reading Time: …" ahead of "• Sanity Cost:", so walk back over those.
+function tomeStatGroupStart(section: string, sanityAt: number): number {
+  const pre = section.slice(Math.max(0, sanityAt - 450), sanityAt);
+  const m = pre.match(
+    /(?:•\s*(?:Language|Cthulhu Mythos(?:\s*\([^)]*\))?|Mythos Rating|Reading Time|Study):\s*[^•]*)+$/i,
+  );
+  return m && m.index !== undefined
+    ? sanityAt - (pre.length - m.index)
+    : sanityAt;
+}
+
 function parseTomeStatBlock(
   section: string,
   at: number,
@@ -870,8 +933,8 @@ function parseTomeStatBlock(
   studyUnit: string;
   spellsStart: number;
 } | null {
-  const window = section.slice(at, at + 500);
-  const san = window.match(/•\s*Sanity Loss:\s*([^\•]+?)(?=\s+•)/i);
+  const window = section.slice(at, at + 600);
+  const san = window.match(/•\s*Sanity (?:Loss|Cost):\s*([^\•]+?)(?=\s+•)/i);
   if (!san) return null;
   let initial = 0;
   let final = 0;
@@ -900,7 +963,7 @@ function parseTomeStatBlock(
   }
   const rating = window.match(/•\s*Mythos Rating:\s*(\d+)/i);
   const study = window.match(
-    /•\s*Study:\s*(\d+)\s*(weeks?|days?|months?|hours?)/i,
+    /•\s*(?:Study|Reading Time):\s*(\d+)\s*(weeks?|days?|months?|hours?)/i,
   );
   const spells = window.match(/•\s*Spells:\s*/i);
   if (!rating || !study || !spells || spells.index === undefined) return null;
@@ -923,7 +986,7 @@ export function parseAppendixTomes(text: string): AppendixTome[] {
       /\bTOMES\b/,
       "D",
       /\bART[EI]FACTS\b/,
-      /•\s*Sanity Loss:/,
+      /•\s*Sanity (?:Loss|Cost):/,
     ),
   );
   if (!section) return [];
@@ -940,12 +1003,13 @@ export function parseAppendixTomes(text: string): AppendixTome[] {
     spellsStart: number;
   }[] = [];
 
-  const sanRe = /•\s*Sanity Loss:/gi;
+  const sanRe = /•\s*Sanity (?:Loss|Cost):/gi;
   let sm: RegExpExecArray | null;
   while ((sm = sanRe.exec(section))) {
-    const parsed = parseTomeStatBlock(section, sm.index);
+    const index = tomeStatGroupStart(section, sm.index);
+    const parsed = parseTomeStatBlock(section, index);
     if (!parsed) continue;
-    anchors.push({ index: sm.index, ...parsed });
+    anchors.push({ index, ...parsed });
   }
 
   for (let i = 0; i < anchors.length; i++) {
@@ -965,6 +1029,9 @@ export function parseAppendixTomes(text: string): AppendixTome[] {
     let spells = cleanSpaces(section.slice(a.spellsStart, spellsEnd));
     const stop = spells.search(/\.(?:\s|$)/);
     if (stop >= 0) spells = spells.slice(0, stop + 1);
+    // "none" is the whole list; prose after it belongs to the entry.
+    if (/^none\b/i.test(spells))
+      spells = /^none\./i.test(spells) ? "none." : "none";
     if (spells.length > 800) spells = spells.slice(0, 800);
     const parsed = splitTomePreamble(before);
     let name = parsed.name;
@@ -1046,9 +1113,11 @@ export function parseAppendixArtefacts(text: string): AppendixArtefact[] {
     ),
   );
   if (!section) return [];
+  // Banners only — a lowercase "artifacts" in an entry's own prose ("one of
+  // the artifacts the heroes will have encountered") must not cut the section.
   const artBanners = [
     ...section.matchAll(
-      /\b(?:ART[EI]FACTS|DEEP ONE ARTIFACTS|NEW ARTIFACTS)\b/gi,
+      /\b(?:ART[EI]FACTS|DEEP ONE ARTIFACTS|NEW ARTIFACTS)\b/g,
     ),
   ];
   if (artBanners.length > 0) {
@@ -1202,14 +1271,54 @@ export function parseAppendixItems(text: string): AppendixItem[] {
     ...parseAppendixSpells(text).map((s) => ({
       kind: "spell" as const,
       ...s,
+      name: titleCaseItemName(s.name),
     })),
     ...parseAppendixTomes(text).map((t) => ({
       kind: "tome" as const,
       ...t,
+      name: titleCaseItemName(t.name),
     })),
     ...parseAppendixArtefacts(text).map((a) => ({
       kind: "artefact" as const,
       ...a,
+      name: titleCaseItemName(a.name),
     })),
   ];
+}
+
+const ITEM_TITLE_CONNECTORS = new Set([
+  "of",
+  "the",
+  "a",
+  "an",
+  "and",
+  "or",
+  "from",
+  "for",
+  "with",
+  "in",
+  "to",
+  "on",
+  "at",
+]);
+
+// A book that prints its appendix titles in ALL CAPS, with a deferred article
+// ("FIVE DEADLY VENOMS, THE", "CONTACT YIG (VARIANT)"), reads as "The Five
+// Deadly Venoms" / "Contact Yig (Variant)". A mixed-case title is left alone.
+export function titleCaseItemName(name: string): string {
+  let n = cleanSpaces(name);
+  if (/[a-z]/.test(n)) return n;
+  const deferred = /^(.*?),\s*(THE|A|AN)$/.exec(n);
+  if (deferred) n = `${deferred[2]} ${deferred[1]}`;
+  const words = n.toLowerCase().split(/\s+/);
+  return words
+    .map((w, i) => {
+      const bare = w.replace(/^[(]+/, "");
+      if (i > 0 && ITEM_TITLE_CONNECTORS.has(bare)) return w;
+      return w.replace(
+        /(^|[(\/-])([a-z\u00e0-\u00ff])/g,
+        (_m, sep, c) => sep + c.toUpperCase(),
+      );
+    })
+    .join(" ");
 }

@@ -762,6 +762,68 @@ describe("parseCocCharacters (unit)", () => {
     );
   });
 
+  test("a pre-gen's name ahead of its 'Age NN' title run ends the previous sheet's body", () => {
+    const { text, chunks } = chunked([
+      {
+        t: "CHRISTINE MEI, Age 36, Medical Doctor Archetype: Scholar",
+        h: 11,
+        p: 1,
+      },
+      {
+        t:
+          STATS +
+          " Combat Brawl 40% (20/8), damage 1D3 Skills Climb 40%. • Traits: Cheerful, often smiling. Seeks knowledge.",
+        p: 1,
+      },
+      { t: "DERRICK JAMESON,", h: 11, p: 2 },
+      { t: "Age 35, Private Investigator Archetype: Hardboiled", h: 14, p: 2 },
+      {
+        t:
+          STATS +
+          " Combat Brawl 60% (30/12), damage 1D3 Skills Climb 50%. • Traits: Fights fire with fire.",
+        p: 2,
+      },
+    ]);
+    const cs = parseCocCharacters(text, chunks);
+    assert.deepEqual(
+      cs.map((c) => c.name),
+      ["Christine Mei", "Derrick Jameson"],
+    );
+    assert.match(
+      cs[0].background.find((b) => b.title === "Traits")!.text,
+      /^Cheerful, often smiling\. Seeks knowledge\.?$/,
+    );
+  });
+
+  test("an 'APPENDIX A' running header at title height is not a creature's name", () => {
+    const { text, chunks } = chunked([
+      { t: "Jane Doe, 30, clerk", h: 11, p: 1 },
+      {
+        t: STATS + " Combat Brawl 40% (20/8), damage 1D3 Skills Charm 40%.",
+        p: 1,
+      },
+      { t: "TYRANISSH, THE DREAMING SORCERER", h: 17, p: 2 },
+      {
+        t: "Tyranissh has been lost in dream dimensions for millennia. She believes the serpent people have forsaken her.",
+        p: 2,
+      },
+      { t: "APPENDIX A", h: 17, p: 3 },
+      { t: "Heroes who befriend her may learn some Naacal from her.", p: 3 },
+      {
+        t: "STR 90 CON 75 SIZ 85 DEX 90 INT 120 APP — POW 125 EDU — SAN — HP 16 DB: +1D6 Build: 2 Move: 8 MP: 25 Luck: 99 Combat Fighting 70% (35/14), damage 1D3+1D6 Dodge 45% (22/9) Skills Cthulhu Mythos 60%. Sanity loss: 0/1D6 Sanity points to see her.",
+        p: 3,
+      },
+    ]);
+    const cs = parseCocCharacters(text, chunks);
+    assert.deepEqual(
+      cs.map((c) => [c.name, c.description]),
+      [
+        ["Jane Doe", "clerk"],
+        ["Tyranissh", "The Dreaming Sorcerer"],
+      ],
+    );
+  });
+
   test("a block's body never runs past the page after its STR line", () => {
     const { text, chunks } = chunked([
       { t: "Jane Doe, 30, clerk", h: 11, p: 2 },
@@ -1307,6 +1369,34 @@ describe("parseCocCharacters (unit)", () => {
       ["Bite", "Dodge"],
     );
     assert.equal(c.skills["Stealth"], 90);
+  });
+
+  test("a running header glued before a page's first skill is dropped", () => {
+    const [c] = parseCocCharacters(
+      "Jane Doe, 30, clerk " +
+        STATS +
+        " Combat Brawl 40% (20/8), damage 1D3 " +
+        "Skills Climb 40% (20/8), Listen 30% (15/6), PRE-GENERATED PLAYER CHARACTERS Mechanical Repair 20% (10/4), Ride 45% (22/9).",
+    );
+    assert.deepEqual(Object.keys(c.skills), [
+      "Climb",
+      "Listen",
+      "Mechanical Repair",
+      "Ride",
+    ]);
+  });
+
+  test("a running header at the foot of a background section is dropped", () => {
+    const [c] = parseCocCharacters(
+      "Jane Doe, 30, clerk " +
+        STATS +
+        " Combat Brawl 40% (20/8), damage 1D3 " +
+        "• Personal Description: tall and thin. • Traits: cheerful, often smiling. Seeks knowledge. APPENDIX D",
+    );
+    assert.equal(
+      c.background.find((b) => b.title === "Traits")!.text,
+      "cheerful, often smiling. Seeks knowledge.",
+    );
   });
 
   test("the generic NPC member-name fallback keeps its acronym", () => {

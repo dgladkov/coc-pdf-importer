@@ -4,6 +4,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert";
 import {
+  titleCaseItemName,
   parseSpellCosts,
   parseStudyUnits,
   parseAppendixSpells,
@@ -504,6 +505,102 @@ describe("parseAppendixSpells — titles", () => {
     assert.deepEqual(
       spells.map((s) => s.name),
       ["Call Deity: Father Dagon or Mother Hydra", "Ecstasy"],
+    );
+  });
+});
+
+describe("titleCaseItemName", () => {
+  test("reads an ALL-CAPS title with a deferred article as a title", () => {
+    assert.equal(
+      titleCaseItemName("FIVE DEADLY VENOMS, THE"),
+      "The Five Deadly Venoms",
+    );
+    assert.equal(
+      titleCaseItemName("CONTACT YIG (VARIANT)"),
+      "Contact Yig (Variant)",
+    );
+    assert.equal(
+      titleCaseItemName("EXTRACTS FROM THE R’LYEH TEXT"),
+      "Extracts from the R’lyeh Text",
+    );
+    assert.equal(titleCaseItemName("Gospel of Yig"), "Gospel of Yig");
+  });
+});
+
+describe("parseAppendixTomes — Serpent 'Sanity Cost' shape", () => {
+  test("anchors on the stat group's first bullet so a rating printed before the Sanity line is read", () => {
+    const tomes = parseAppendixTomes(`
+APPENDIX C
+TOMES
+ANNALS OF TEST
+ • Appearance in the campaign: Chapter 1: Bolivia
+These fragile scrolls are written in Naacal and tell the history of Mu.
+The Annals of Test
+ • Language: Naacal
+ • Cthulhu Mythos (Initial Reading): +1%
+ • Cthulhu Mythos (Full Study): +3%
+ • Mythos Rating: 12
+ • Reading Time: 1 week
+ • Sanity Cost: 1D4
+ • Spells: Summon/Bind Formless Spawn.
+APPENDIX D
+ARTIFACTS
+`);
+    assert.equal(tomes.length, 1);
+    assert.equal(tomes[0].name, "ANNALS OF TEST");
+    assert.equal(tomes[0].sanityLoss, "1D4");
+    assert.equal(tomes[0].mythosRating, 12);
+    assert.deepEqual(tomes[0].cthulhuMythos, { initial: 1, final: 3 });
+    assert.deepEqual(tomes[0].study, { necessary: 1, units: "CoC7.weeks" });
+    assert.match(tomes[0].spells, /Formless Spawn/);
+  });
+});
+
+describe("parseAppendixSpells — last entry", () => {
+  test("a book whose spells close the appendix ends the last write-up at the next section", () => {
+    const spells = parseAppendixSpells(`
+APPENDIX B
+NEW SPELLS
+ALPHA BOLT
+ • Cost: 4 magic points; 1D2 Sanity points
+ • Casting time: 1 round
+Fires a glowing bolt that deals harm to one target.
+OMEGA WARD
+ • Cost: 2 magic points; 1 Sanity point
+ • Casting time: 5 rounds
+Creates a short-lived barrier against spirits. The caster must hold still for the duration.
+CHAPTER 14 COLLECTED HANDOUTS A telegram reads: DEAR FRIEND STOP I WISH TO PREVAIL UPON YOU.
+`);
+    assert.deepEqual(
+      spells.map((s) => s.name),
+      ["ALPHA BOLT", "OMEGA WARD"],
+    );
+    assert.equal(
+      spells[1].description,
+      "Creates a short-lived barrier against spirits. The caster must hold still for the duration.",
+    );
+  });
+});
+
+describe("parseAppendixArtefacts — Serpent banners", () => {
+  test("the page banner and a prose 'artifacts' do not cut entries", () => {
+    const arts = parseAppendixArtefacts(`
+248 NEW ARTIFACTS, TECHNOLOGY, TOMES AND SPELLS ARTIFACTS
+COBRA CROWN, THE
+ • Appearance in the campaign: Chapter 7: Calcutta
+The Cobra Crown was once worn by the Sorcerer-Kings. It is one of the artifacts the heroes will have encountered: a thick dome of gold.
+249 NEW ARTIFACTS, TECHNOLOGY, TOMES AND SPELLS
+COILED WATCHER, THE
+ • Appearance in the campaign: Chapter 2: New York City
+A small jade statue, three inches in height.
+TECHNOLOGY
+ENVIRONMENTAL SUIT
+ • Appearance in the campaign: Chapter 5: Iceland
+While the form of an environmental suit has a human outline, it appears to be little more than skin.
+`);
+    assert.deepEqual(
+      arts.map((a) => a.name),
+      ["COBRA CROWN, THE", "COILED WATCHER, THE", "ENVIRONMENTAL SUIT"],
     );
   });
 });
