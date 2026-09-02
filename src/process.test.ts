@@ -861,7 +861,7 @@ describe("parseCocCharacters (unit)", () => {
 
   test("an Innsmouth pulp box: bulleted talents with pulp HP/Luck, ended by following prose", () => {
     const chars = parseCocCharacters(
-      "Bob Smith age 30, clerk STR 50 APP 50 CON 50 POW 60 SIZ 45 EDU 45 DEX 70 SAN 60 INT 70 HP 11 DB 0 Build 0 Move 8 MP 15 " +
+      "Bob Smith age 30, clerk STR 50 APP 50 CON 50 POW 60 SIZ 50 EDU 45 DEX 70 SAN 60 INT 70 HP 11 DB 0 Build 0 Move 8 MP 15 " +
         "Skills Climb 40%. COMBAT % damage Brawl 40% (20/8) damage 1D4+1 Dodge 40% (20/16) Pulp Modification Pulp Talents " +
         "M HP: 20 M Luck: 45 M Fleet Footed: spend 10 Luck to avoid being outnumbered in melee combat for one combat encounter. " +
         "M Quick Draw: does not need to have their firearm readied to gain +50 DEX for combat. Third Floor A walk runs the perimeter. " +
@@ -891,6 +891,80 @@ describe("parseCocCharacters (unit)", () => {
       { name: "Fleet Footed", description: "May spend 10 Luck to avoid being outnumbered (e.g. by two or more) in melee combat" },
     ]);
     assert.equal(c.armor, "1-point scales");
+  });
+
+  test("a talent's mid-sentence 'Sanity loss' does not end an Innsmouth box", () => {
+    const [c] = parseCocCharacters(
+      "Bob Smith age 30, clerk STR 50 APP 50 CON 50 POW 60 SIZ 50 EDU 45 DEX 70 SAN 60 INT 70 HP 11 DB 0 Build 0 Move 8 MP 15 " +
+        "Skills Climb 40%. COMBAT % damage Brawl 40% (20/8) damage 1D4+1 Dodge 40% (20/16) Pulp Modification Pulp Talents " +
+        "M HP: 20 M Luck: 42 M Hardened: ignores Sanity loss from viewing horrific injuries or the deceased. " +
+        "M Resourceful: always has what's needed at hand; spend 10 Luck points to find a useful piece of equipment or tool. " +
+        "M Strong Willed: spend 10 Luck points to gain one bonus die when making POW rolls. 611 FULLER RESIDENCE A house.",
+    );
+    assert.deepEqual(c.pulp!.talents, [
+      { name: "Hardened", description: "Ignores Sanity loss from viewing horrific injuries or the deceased" },
+      { name: "Resourceful", description: "Always has what's needed at hand; spend 10 Luck points to find a useful piece of equipment or tool" },
+      { name: "Strong Willed", description: "Spend 10 Luck points to gain one bonus die when making POW rolls" },
+    ]);
+    assert.equal(c.sanityLoss, null);
+  });
+
+  // Innsmouth's boxes sit in a sidebar, so a page's text order can put one NPC's
+  // box after the next NPC's block. Pulp HP is (CON + SIZ) / 5: each box goes to
+  // the block whose characteristics give its HP, and one nobody's do is dropped.
+  test("Innsmouth pulp boxes are claimed by the actor whose CON + SIZ gives the box's HP", () => {
+    const cs = parseCocCharacters(
+      "Ann Able age 33, scientist STR 60 APP 60 CON 75 POW 70 SIZ 70 EDU 60 DEX 60 SAN 50 INT 70 HP 14 DB 0 Build 0 Move 8 MP 14 " +
+        "Skills Climb 40%. COMBAT % damage Brawl 40% (20/8) damage 1D3 Dodge 30% (15/6) " +
+        "Bob Baker age 50, retainer STR 55 APP 55 CON 65 POW 55 SIZ 75 EDU 60 DEX 45 SAN 50 INT 60 HP 14 DB +1D4 Build 1 Move 5 MP 11 " +
+        "Skills Listen 60%. COMBAT % damage Fighting 55% (27/11) damage 1D3+1D4 Dodge 30% (15/6) " +
+        "Pulp Modification Pulp Talents M HP: 29 M Luck: 60 M Fleet Footed: may spend 10 Luck to avoid being outnumbered in melee combat for one combat encounter. " +
+        "M Night Vision: ignore penalty die for shooting in the dark. " +
+        "Pulp Modification Pulp Talents M HP: 28 M Luck: 27 M Heavy Hitter: may spend 10 Luck points to add an additional damage die when dealing out melee damage. " +
+        "M Quick Draw: does not need to have their firearm readied. " +
+        "Pulp Modification Pulp Talents M HP: 40 M Luck: 50 M Alert: never surprised in combat. Third Floor A walk runs the perimeter.",
+    );
+    assert.equal(cs.length, 2);
+    const [ann, bob] = cs;
+    assert.equal(ann.pulp!.hp, 29);
+    assert.equal(ann.pulp!.luck, 60);
+    assert.deepEqual(ann.pulp!.talents.map((t) => t.name), ["Fleet Footed", "Night Vision"]);
+    assert.equal(bob.pulp!.hp, 28);
+    assert.equal(bob.pulp!.luck, 27);
+    assert.deepEqual(bob.pulp!.talents.map((t) => t.name), ["Heavy Hitter", "Quick Draw"]);
+  });
+
+  test("a base form does not take the pulp sections printed for its Form continuation", () => {
+    const cs = parseCocCharacters(
+      "Eloise Vane, 21, heiress STR 35 CON 40 SIZ 60 DEX 45 INT 60 APP 70 POW 50 EDU 70 SAN 46 HP 10 " +
+        "DB: 0 Build: 0 Move: 7 MP: 10 Luck: 50 Combat Attacks per round: 1 Brawl 25% (12/5), damage 1D3 Dodge 30% (15/6) " +
+        "Skills Charm 40%, Climb 40%. Languages English 70%. " +
+        "Eloise in Ghoul Form STR 85 CON 80 SIZ 80 DEX 90 INT 60 APP — POW 50 EDU — SAN — HP 16 " +
+        "DB: +1D6 Build: 2 Move: 10 MP: 8 Luck: 50 Combat Attacks per round: 3 Fighting 40% (20/8), damage 1D6+1D6 Dodge 60% (30/12) " +
+        "Pulp Combat Fighting 80% (40/16), damage 1D6+1D6 Dodge 70% (35/14) " +
+        "Pulp Talents Tough Guy: soaks up damage, may spend 10 Luck points to shrug off up to 5 damage taken in one combat round. " +
+        "Skills Climb 60%, Stealth 60%.",
+    );
+    assert.equal(cs.length, 2);
+    const [base, ghoul] = cs;
+    assert.equal("pulp" in base, false);
+    assert.deepEqual(
+      ghoul.pulp!.combat.map((a) => [a.name, a.value]),
+      [["Fighting", 80], ["Dodge", 70]],
+    );
+    assert.deepEqual(ghoul.pulp!.talents.map((t) => t.name), ["Tough Guy"]);
+  });
+
+  test("a Psychic Power's form is read from the start of a longer description", () => {
+    const [c] = parseCocCharacters(
+      "Jane Doe, 30, clerk " + STATS + " Combat Brawl 40% (20/8), damage 1D3 " +
+        "Pulp Talents Psychic Power: Psychometry 70%; sense the emotional connections of inanimate objects. " +
+        "Strong Willed: gains a bonus die when making POW rolls. Skills Climb 40%.",
+    );
+    assert.deepEqual(c.pulp!.talents, [
+      { name: "Psychic Power (Psychometry)", description: "Psychometry 70%; sense the emotional connections of inanimate objects" },
+      { name: "Strong Willed", description: "Gains a bonus die when making POW rolls" },
+    ]);
   });
 
   test("the generic NPC member-name fallback keeps its acronym", () => {

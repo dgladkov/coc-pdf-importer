@@ -306,6 +306,7 @@ export function parseCocCharacters(
         : headers[i].headerStart;
     return {
       strIndex,
+      start: blockStart,
       body: text.slice(strIndex, bodyEnd),
       preTable: text.slice(blockStart, strIndex),
     };
@@ -381,6 +382,7 @@ export function parseCocCharacters(
     }
     parsedBlocks.push(parsed);
   });
+  assignPulpBoxes(text, blocks, parsedBlocks);
 
   // A creature's stat lines can be typeset *after* a group table that follows
   // its prose (the Masks booklet prints "Sample Children of the Sphinx" between
@@ -1211,8 +1213,9 @@ function parseBlock(
   // Skills / Sanity section printed *after* the last line, supplied here as
   // `sharedTail`. Both are last-resort fallbacks behind the block's own body.
   const fallback = numCols > 1 ? preTable : "";
+  const bodyCombat = combatSection(body);
   const combatText =
-    combatSection(body) || combatSection(fallback) || combatSection(sharedTail);
+    bodyCombat || combatSection(fallback) || combatSection(sharedTail);
   const attacksPerRound = parseAttacksPerRound(combatText);
   let combat = parseCombat(combatText);
   // Some (esp. pre-generated investigator) sheets list attack profiles with no
@@ -1262,14 +1265,20 @@ function parseBlock(
   }
   const note = parseNoteBeforeCombat(body);
   const notes = note ? [note] : [];
-  // The optional Pulp Cthulhu variant printed inside the block.
+  // The optional Pulp Cthulhu variant printed inside the block. A block with
+  // combat of its own does not take the pulp sections of the block it shares a
+  // tail with: a base form's "... Form" continuation prints its own Pulp Combat.
+  // Innsmouth's boxed lists (with pulp HP) are assigned by assignPulpBoxes.
+  const pulpTail = bodyCombat ? "" : sharedTail;
   const pulp = parsePulpVariant(
     sectionBody(body, "Pulp Combat") ||
       sectionBody(fallback, "Pulp Combat") ||
-      sectionBody(sharedTail, "Pulp Combat"),
-    sectionBody(body, "Pulp Talents") ||
-      sectionBody(fallback, "Pulp Talents") ||
-      sectionBody(sharedTail, "Pulp Talents"),
+      sectionBody(pulpTail, "Pulp Combat"),
+    withoutPulpBoxes(
+      sectionBody(body, "Pulp Talents") ||
+        sectionBody(fallback, "Pulp Talents") ||
+        sectionBody(pulpTail, "Pulp Talents"),
+    ),
   );
 
   if (numCols <= 1) {
@@ -1430,6 +1439,15 @@ function findLabel(masked: string, label: string, min = 0): number {
     // "Pulp Combat" / "Pulp Talents" are their own sections, not the "Combat"
     // heading of a block that has none.
     if (/\bPulp\s+$/i.test(before) && !/^pulp/i.test(label)) continue;
+    // A label word inside a sentence ("ignores Sanity loss from viewing …") is
+    // prose: a heading is never both preceded and followed by a lowercase word
+    // (its value may be "none" / "special" / "see …", which are allowed).
+    const afterLabel = masked.slice(m.index + m[0].length, m.index + m[0].length + 12);
+    if (
+      /[a-z]\s+$/.test(masked.slice(Math.max(0, m.index - 12), m.index)) &&
+      /^\s+(?!none\b|special\b|see\b)[a-z]/.test(afterLabel)
+    )
+      continue;
     if (
       guardLanguages &&
       /^\s*\d/.test(masked.slice(m.index + m[0].length, m.index + m[0].length + 24))
@@ -2022,6 +2040,99 @@ function parsePulpVariant(
   return { attacksPerRound, combat, talents, hp, luck };
 }
 
+// The Innsmouth pulp box header: each NPC's variant is a boxed "Pulp
+// Modification / Pulp Talents" sidebar listing pulp HP and Luck.
+const PULP_BOX_HEADER = /\bPulp Modification\s+Pulp Talents\b/gi;
+
+// `text` with Innsmouth's boxed lists removed — a box carries pulp HP, and is
+// assigned to its owner by assignPulpBoxes rather than read where it happens
+// to sit — leaving a Masks-style list, which has no HP.
+function withoutPulpBoxes(text: string): string {
+  return text
+    .split(PULP_BOX_HEADER)
+    .filter((part) => !/\bHP\s*:\s*\d/.test(part))
+    .join(" ")
+    .trim();
+}
+
+// Every Innsmouth pulp box in `text`: the list after each box header, up to
+// the next section label (the next box's own "Pulp Talents" included). A
+// header repeated mid-list without HP continues the previous box.
+function pulpBoxes(text: string): { text: string; hp: number | null }[] {
+  const out: { text: string; hp: number | null }[] = [];
+  const re = new RegExp(PULP_BOX_HEADER.source, "gi");
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    const rest = text.slice(m.index + m[0].length);
+    const end = nextSectionLabel(maskParens(rest));
+    const box = clean(rest.slice(0, end));
+    const hpMatch = /\bHP\s*:\s*(\d{1,3})\b/.exec(box);
+    if (!hpMatch && out.length) out[out.length - 1].text += " " + box;
+    else out.push({ text: box, hp: hpMatch ? Number(hpMatch[1]) : null });
+  }
+  return out;
+}
+
+// Innsmouth prints each NPC's Pulp Cthulhu variant in a boxed sidebar, and a
+// page's extraction order can leave that box in a neighbouring block's text
+// (before the owner's STR line, or after the next block's). Pulp HP is
+// (CON + SIZ) / 5, so a box is claimed by the block whose characteristics give
+// its HP: first the block whose region holds it, then an adjacent block still
+// without one. A box whose HP cannot be checked stays with its region.
+function assignPulpBoxes(
+  text: string,
+  blocks: { start: number }[],
+  parsed: CocCharacter[][],
+): void {
+  const boxes: { region: number; text: string; hp: number | null; taken: boolean }[] = [];
+  blocks.forEach((block, i) => {
+    const end = i + 1 < blocks.length ? blocks[i + 1].start : text.length;
+    for (const box of pulpBoxes(text.slice(block.start, end)))
+      boxes.push({ region: i, ...box, taken: false });
+  });
+  if (!boxes.length) return;
+
+  const single = (i: number): CocCharacter | null =>
+    i >= 0 && i < parsed.length && parsed[i].length === 1 ? parsed[i][0] : null;
+  const expectedHp = (i: number): number | null => {
+    const c = single(i);
+    const CON = c?.characteristics.CON?.value;
+    const SIZ = c?.characteristics.SIZ?.value;
+    return CON != null && SIZ != null ? Math.floor((CON + SIZ) / 5) : null;
+  };
+  const claimed = new Set<number>();
+  const claim = (i: number, box: (typeof boxes)[number]) => {
+    const c = single(i)!;
+    const { talents, hp, luck } = parsePulpTalentList(box.text);
+    c.pulp = {
+      attacksPerRound: c.pulp?.attacksPerRound ?? null,
+      combat: c.pulp?.combat ?? [],
+      talents,
+      hp,
+      luck,
+    };
+    claimed.add(i);
+    box.taken = true;
+  };
+  const matches = (i: number, box: (typeof boxes)[number]): boolean =>
+    !claimed.has(i) && box.hp != null && expectedHp(i) === box.hp;
+
+  for (const box of boxes)
+    if (matches(box.region, box)) claim(box.region, box);
+  for (const box of boxes) {
+    if (box.taken) continue;
+    for (const i of [box.region - 1, box.region + 1])
+      if (matches(i, box)) {
+        claim(i, box);
+        break;
+      }
+  }
+  for (const box of boxes) {
+    const i = box.region;
+    if (box.taken || claimed.has(i) || !single(i)) continue;
+    if (box.hp == null || expectedHp(i) == null) claim(i, box);
+  }
+}
+
 // A "Pulp Talents" list. Entries read "Name: description." (Masks), "Name
 // (description)" (Two-Headed Serpent), or — Innsmouth — one "M"-glyph bullet
 // each, mixed with pulp "HP: 20" / "Luck: 45" values. A "Note:" entry is prose,
@@ -2076,7 +2187,7 @@ function parsePulpTalentList(text: string): {
     description = clean(description.replace(/[.;]\s*$/, ""));
     // A talent taken in a specific form ("Psychic Power: Divination 60%") is
     // named for that form, so the choice is kept when the item is created.
-    const form = /^([A-Z][A-Za-z]+)\s+\d{1,3}%$/.exec(description);
+    const form = /^([A-Z][A-Za-z]+)\s+\d{1,3}%(?:\W|$)/.exec(description);
     if (form) name = `${name} (${form[1]})`;
     // The books print the text as a lowercase fragment after the name ("Alert:
     // never surprised in combat"); make it read as a sentence.
