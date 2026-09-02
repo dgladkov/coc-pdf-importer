@@ -440,9 +440,29 @@ export function parseCocCharacters(
   }
   const characters = parsedBlocks.flat();
 
-  return characters
-    .map((c) => ({ ...c, name: cleanActorName(c.name) }))
-    .filter((c) => !isSpuriousActor(c));
+  return disambiguateNames(
+    characters
+      .map((c) => ({ ...c, name: cleanActorName(c.name) }))
+      .filter((c) => !isSpuriousActor(c)),
+  );
+}
+
+// Two profiles of one creature share its name ("Ssathasaa, serpent person" and
+// "Ssathasaa, as Bertha Shipley"); an import keyed on the name would keep only
+// the last. A later block whose descriptor differs from the first's is named
+// with it: "Ssathasaa (as Bertha Shipley)". A same-descriptor reprint is left
+// alone (it is the same profile).
+function disambiguateNames(characters: CocCharacter[]): CocCharacter[] {
+  const first = new Map<string, string>();
+  return characters.map((c) => {
+    const seen = first.get(c.name);
+    if (seen === undefined) {
+      first.set(c.name, c.description);
+      return c;
+    }
+    if (!c.description || c.description === seen) return c;
+    return { ...c, name: `${c.name} (${c.description})` };
+  });
 }
 
 // A block that isn't really an actor: its name was picked out of a prose/credits
@@ -704,9 +724,21 @@ function sectionHeadingFromChunks(
     const parts: string[] = [];
     let start = chunks[i].start;
     let j = i;
+    // A title never spans a page: a caption at the foot of the previous page
+    // ("The Chakota's Dark Spirit") set at the same height is not part of it.
+    // A margin tag there that repeats the name ("Charlie Johnson" before the
+    // page's "Charlie Johnson, age 39, …") is kept, so the run — and the
+    // previous block's body — still ends before it.
+    const page = chunks[i].page;
+    const alpha = (t: string) => t.toLowerCase().replace(/[^a-z]/g, "");
     for (
       ;
-      j >= 0 && chunks[j].height === height && chunks[j].start >= leftBound;
+      j >= 0 &&
+      chunks[j].height === height &&
+      chunks[j].start >= leftBound &&
+      (chunks[j].page === page ||
+        (alpha(chunks[j].text).length > 0 &&
+          alpha(parts.join(" ")).includes(alpha(chunks[j].text))));
       j--
     ) {
       parts.unshift(chunks[j].text);
@@ -722,6 +754,15 @@ function sectionHeadingFromChunks(
   return none;
 }
 
+// Rejoin a heading word the PDF letter-spaced ("F l y i n g Polyps" ->
+// "Flying Polyps"): a capital followed by two or more lone lowercase letters.
+function joinLetterSpaced(text: string): string {
+  return text.replace(
+    /\b([A-Z])((?:\s+[a-z]){2,})(?=\s|$)/g,
+    (_m, c, rest) => c + rest.replace(/\s+/g, ""),
+  );
+}
+
 // Parse a clean heading run ("Jackson Elias , 41, fearless investigator",
 // "The Dead Light, hideous devourer", "Shantak") into name / age / description.
 function parseNameRun(
@@ -729,7 +770,7 @@ function parseNameRun(
 ): { name: string; age: number | null; description: string } | null {
   // Drop a leading "Name:" label, then repair a letter-spaced colon inside the
   // heading ("Million Favored Ones : The Dead" -> "... Ones: The Dead").
-  const heading = clean(runText)
+  const heading = joinLetterSpaced(clean(runText))
     .replace(/^Name\s*:?\s*/i, "")
     .replace(/\s+:\s*/g, ": ")
     .replace(STAT_TABLE_COLUMN_HEADER, "");
@@ -1540,6 +1581,7 @@ function tokenizeStatHeader(header: string): Map<string, string[]> {
 function isValueToken(token: string): boolean {
   return (
     /^[+-]?\d{1,3}\*?$/.test(token) || // 40, -2, 32*
+    /^\d{1,3}(?:,\d{3})+\*?$/.test(token) || // 1,750 (the Black Sphinx's SIZ)
     /^[+-]?\d*[dD]\d+(?:[+-]\d+)?$/.test(token) || // +1D4, 1D10+5
     token === "-" || // em/en dash (N/A)
     token === "?" || // unknown / unpublished (Innsmouth EDU ?)
@@ -1583,7 +1625,7 @@ function characteristicsForColumn(
     if (!values || values[j] === undefined) continue;
     const raw = values[j];
     const marked = raw.includes("*");
-    const num = raw.replace(/\*/g, "");
+    const num = raw.replace(/\*/g, "").replace(/,/g, "");
     out[label] = {
       value: /^-?\d+$/.test(num) ? Number(num) : null,
       raw,
@@ -1836,16 +1878,29 @@ function titleCaseTitle(title: string): string {
 function groupNameFromPrefix(prefix: string): string {
   // A trailing "(Scanlon's vaqueros, Romero's cowboys)" is a descriptor, not
   // part of the title (its lowercase words would otherwise end the walk).
-  const tokens = prefix
+  const tokens = joinLetterSpaced(prefix)
     .replace(/\s*\([^()]*,[^()]*\)\s*$/, "")
     .trim()
     .split(/\s+/)
     .filter(Boolean);
   let start = tokens.length;
+  // A title is set in one case style. Once the walk has collected only
+  // ALL-CAPS words ("CIIMBA, MONSTROUSLY STRONG UNDEAD HORRORS"), a mixed-case
+  // word before them is a caption from the previous page ("The Chakota's Dark
+  // Spirit"), not more of the title.
+  // (A lone letter — a squad label "A", an initial — has no case style.)
+  let sawCaps = false;
+  let sawMixed = false;
   for (let i = tokens.length - 1; i >= 0 && tokens.length - i <= 12; i--) {
     const token = tokens[i];
     if (/\.$/.test(token)) break; // sentence end
     const letters = token.replace(/[^A-Za-z]/g, "");
+    const mixed = letters.length >= 2 && /[a-z]/.test(letters);
+    if (mixed && sawCaps && !sawMixed) break;
+    if (letters.length >= 2) {
+      if (mixed) sawMixed = true;
+      else sawCaps = true;
+    }
     if (!letters) {
       // A value-like fragment ("(17/7)", dice) means we have walked back past the
       // title into the previous block's stats. Bare punctuation ("(") is part of
@@ -2501,6 +2556,10 @@ function parseCombat(text: string): CombatEntry[] {
   // edition.
   text = text.replace(/\bFighting Brawl\b/g, "Brawl");
 
+  // A caliber printed with a space instead of its hyphen (".30 06 bolt-action
+  // rifle") would leave "06" read as a stray count that cuts the name short.
+  text = text.replace(/(^|\s)(\.\d{2})\s(\d{2})(?=\s+[A-Za-z])/g, "$1$2-$3");
+
   // Some books label the half/fifth values, with or without % signs and spaces:
   // "(Hard 20/Extreme 8)" or "(Hard 25%/Extreme10%)" -> "(20/8)" / "(25/10)".
   text = text.replace(
@@ -2549,7 +2608,10 @@ function parseCombat(text: string): CombatEntry[] {
   // Accented Latin letters (À-ɏ) are allowed so a name like "Tantō" or
   // "Feng Wāng" reads as one token rather than truncating at the accent — which
   // would hide the following attack profile and let the prior damage swallow it.
-  const attackName = String.raw`${honorific}(?!\d+[dD]\d+\b)(?!DB\b)(?!Combat\b)\.?[A-Z0-9À-ɏ](?:[A-Za-z0-9 /'"+#*À-ɏ-]|\([^),]*\)|\.\d)*?`;
+  // Nor a characteristic or "Sanity": prose after a damage ("… 3D10 points of
+  // INT per round", "1 point Sanity loss to all who can hear") would otherwise
+  // be read as the next attack's name up to a following profile.
+  const attackName = String.raw`${honorific}(?!\d+[dD]\d+\b)(?!DB\b)(?!Combat\b)(?!(?:STR|CON|SIZ|DEX|INT|APP|POW|EDU|SAN|HP|MP|Sanity)\b)\.?[A-Z0-9À-ɏ](?:[A-Za-z0-9 /'"+#*À-ɏ-]|\([^),]*\)|\.\d)*?`;
   // The start of the next attack, used only to bound the damage of this one. An
   // attack profile is a value followed by a "(half/fifth)" or ", damage". The %
   // is optional (some Dodges read "Dodge 27 (13/5)") and a comma may sit before
@@ -2561,13 +2623,18 @@ function parseCombat(text: string): CombatEntry[] {
   // starting a prose clause, or the end of the combat text. Kept permissive
   // otherwise so verbose damage ("1D3 + damage bonus(1D4)") survives intact.
   const proseComma = String.raw`,\s+(?:if|when|this|these|then|but|following|followed|each|plus|note|see)\b`;
-  const damage = String.raw`(.+?)(?=\s+${nextAttack}|\s+Dodge\b|\.(?:\s|$)|${proseComma}|$)`;
+  // An auto-hit row ("Five Sucking Maws automatic following a …", "Kiss
+  // automatic when grasped, …") also bounds the damage before it. Its name is a
+  // short run of capitalised words, so a lowercase clause holding the word
+  // ("… maws inflict automatic damage") is not read as one.
+  const autoAttack = String.raw`(?:[A-Z][A-Za-z'’-]*\s+){0,4}[A-Z][A-Za-z'’-]*\s+[Aa]utomatic\b`;
+  const damage = String.raw`(.+?)(?=\s+${nextAttack}|\s+${autoAttack}|\s+Dodge\b|\.(?:\s|$)|${proseComma}|$)`;
   // A maneuver profile carries a prose effect instead of "damage X" after its
   // "(half/fifth)" ("Garrote 45% (22/9), mnvr. to escape or suffer 1D6 damage
   // per round"). Capture that clause as the note. It runs to the next attack /
   // Dodge / end — not to a sentence period, since it can hold an abbreviation
   // ("mnvr.").
-  const maneuverNote = String.raw`(?!damage\b)(.+?)(?=\s+${nextAttack}|\s+Dodge\b|$)`;
+  const maneuverNote = String.raw`(?!damage\b)(.+?)(?=\s+${nextAttack}|\s+${autoAttack}|\s+Dodge\b|$)`;
   // A "damage" field left blank by a print error ("... 45% (22/9), damage
   // Thompson SMG 65% ...") — the value is missing before the next attack. Match
   // an empty damage so it reads as null (the importer then fills it in from the
@@ -2580,10 +2647,17 @@ function parseCombat(text: string): CombatEntry[] {
   //  - a bare "damage X" maneuver with no percentage (damage must start with a
   //    dice/number so effect prose like "Latch damage each round" is not read
   //    as an attack), or
-  //  - an auto-hit attack, which reads "automatic" where a skill % would sit and
-  //    may carry a non-dice damage ("Energy Blast automatic, damage, 20 points").
+  //  - an auto-hit attack, which reads "automatic" where a skill % would sit,
+  //    may state its condition first ("Kiss automatic when grasped, damage …")
+  //    and may carry a non-dice damage ("Energy Blast automatic, damage, 20
+  //    points").
+  const autoCondition = String.raw`(?:\s+((?:if|when|while|after|following|once|upon|unless|only|against|on)\b(?:(?!\bdamage\b)[^%,])*?))?`;
+  // The effect of an auto-hit row written without a "damage" keyword ("Drain
+  // automatic if held, 1D4+2 CON per round", "Howl automatic, 1 point Sanity
+  // loss to all who can hear"), up to the next row.
+  const autoEffect = String.raw`(.+?)(?=\s+${nextAttack}|\s+${autoAttack}|\s+Dodge\b|$)`;
   const re = new RegExp(
-    String.raw`(${attackName})\s+(?:(\d{1,3})\s*%?\s*,?\s*(?:\(\s*(\d{1,3})\s*\/\s*(\d{1,3})\s*\)(?:\s*,?\s*damage\s+${damageOrBlank}|\s*,\s*${maneuverNote})?|damage\s+${damage})|damage\s+(?=\d)${damage}|[Aa]utomatic\b\s*,?\s*damage[,]?\s+${damage})`,
+    String.raw`(${attackName})\s+(?:(\d{1,3})\s*%?\s*,?\s*(?:\(\s*(\d{1,3})\s*\/\s*(\d{1,3})\s*\)(?:\s*,?\s*damage\s+${damageOrBlank}|\s*,\s*${maneuverNote})?|damage\s+${damage})|damage\s+(?=\d)${damage}|[Aa]utomatic\b${autoCondition}(?:\s*,?\s*damage[,]?\s+${damage}|\s*,\s*${autoEffect}))`,
     "g",
   );
 
@@ -2597,18 +2671,35 @@ function parseCombat(text: string): CombatEntry[] {
       half = Math.floor(value / 2);
       fifth = Math.floor(value / 5);
     }
+    // An auto-hit effect is damage when it opens with a dice expression;
+    // otherwise it is the row's note.
+    const effect = match[11] !== undefined ? clean(match[11]) : undefined;
+    const effectIsDamage = effect !== undefined && /^\d*[dD]\d+/.test(effect);
     const { damage, note } = splitDamageNote(
-      match[5] ?? match[7] ?? match[8] ?? match[9],
+      match[5] ??
+        match[7] ??
+        match[8] ??
+        match[10] ??
+        (effectIsDamage ? effect : undefined),
     );
     const maneuver = match[6] ? clean(match[6]) : null;
-    const auto = match[9] !== undefined ? "automatic" : null;
+    let auto: string | null = null;
+    if (match[10] !== undefined || effect !== undefined) {
+      auto = match[9] ? `automatic ${clean(match[9])}` : "automatic";
+      if (effect !== undefined && !effectIsDamage) auto += `, ${effect}`;
+    }
     out.push({
       name: cleanCombatName(match[1]),
       value,
       half,
       fifth,
       damage,
-      note: note ?? maneuver ?? auto,
+      // An auto-hit row's note leads with its "automatic …" reading; a
+      // parenthetical from the damage ("(see above)") follows it.
+      note:
+        auto !== null
+          ? [auto, note].filter(Boolean).join("; ")
+          : (note ?? maneuver),
     });
   }
   return out.flatMap(splitWeaponAlternatives);
@@ -3177,6 +3268,30 @@ function parseActors(pageItems: RawItem[][]): CocCharacter[] {
     }
     newline = true; // page boundary
   }
+
+  // A letter-spaced heading arrives one letter per run ("F" "l" "y" "i" "n"
+  // "g" before "Polyps"). Each lone letter repeats across the book — the spine
+  // text "S E R P E N T O F Y I G" alone supplies most — so run by run they
+  // would all be stripped as furniture below. Merge a sequence of lone letters
+  // into one run, so the repeat test sees the word: "F l y i n g" once, the
+  // spine text on every page. (An initial may be set larger than the rest, so
+  // height is not compared; the merged run keeps the first letter's. Each
+  // letter is reported as its own line, so line breaks are not a boundary.)
+  const mergedRuns: typeof runs = [];
+  for (const run of runs) {
+    const last = mergedRuns[mergedRuns.length - 1];
+    if (
+      last &&
+      /^[A-Za-z]$/.test(run.text) &&
+      /^[A-Za-z](?: [A-Za-z])*$/.test(last.text) &&
+      last.page === run.page
+    ) {
+      last.text += " " + run.text;
+      continue;
+    }
+    mergedRuns.push({ ...run });
+  }
+  runs.splice(0, runs.length, ...mergedRuns);
 
   // Identify page furniture (running headers/footers, side titles): non-body
   // runs whose exact text repeats across many pages. Genuine headings — even

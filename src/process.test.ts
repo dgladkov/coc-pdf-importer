@@ -1126,6 +1126,139 @@ describe("parseCocCharacters (unit)", () => {
     ]);
   });
 
+  test("a characteristic printed with a thousands comma is read (SIZ 1,750)", () => {
+    const [c] = parseCocCharacters(
+      "Black Sphinx, spawn STR 800 CON 400 SIZ 1,750 DEX 45 INT 05 APP — POW 375 EDU — SAN — HP 85 " +
+        "DB: +15D6 Build: 16 Move: 8 MP: 75 Combat Fighting 60% (30/12), damage 15D6 Dodge 10% (5/2)",
+    );
+    assert.equal(c.characteristics.SIZ!.value, 1750);
+    assert.equal(c.characteristics.SIZ!.raw, "1,750");
+    assert.equal(c.derived.Build, 16);
+  });
+
+  test("a caliber printed with a space keeps the weapon's full name", () => {
+    const [c] = parseCocCharacters(
+      "Jane Doe, 30, clerk " +
+        STATS +
+        " Combat Brawl 30% (15/6), damage 1D3 " +
+        ".30 06 bolt-action rifle 45% (22/9), damage 2D6+4 Dodge 40% (20/8)",
+    );
+    assert.deepEqual(
+      c.combat.map((a) => a.name),
+      ["Brawl", ".30-06 bolt-action rifle", "Dodge"],
+    );
+  });
+
+  test("an auto-hit row with a condition is its own attack and bounds the row before it", () => {
+    const [c] = parseCocCharacters(
+      "The Bloated Woman, avatar STR 200 CON 150 SIZ 250 DEX 70 INT 90 APP — POW 100 EDU — SAN — HP 40 " +
+        "DB: +5D6 Build: 6 Move: 8 MP: 20 Combat Attacks per round: 4 " +
+        "Fighting 85% (42/17), damage 3D6 " +
+        "Tentacle Grasp (mnvr) 85% (42/17), damage held for Kiss on following round " +
+        "Kiss automatic when grasped, damage destroys 3D10 points of INT per round " +
+        "Sickle 50% (25/10), damage 1D4+3D6",
+    );
+    assert.deepEqual(
+      c.combat.map((a) => [a.name, a.value, a.damage, a.note]),
+      [
+        ["Fighting", 85, "3D6", null],
+        ["Tentacle Grasp (mnvr)", 85, "held for Kiss on following round", null],
+        [
+          "Kiss",
+          null,
+          "destroys 3D10 points of INT per round",
+          "automatic when grasped",
+        ],
+        ["Sickle", 50, "1D4+3D6", null],
+      ],
+    );
+  });
+
+  test("an auto-hit row without a 'damage' keyword keeps its effect (dice as damage, prose as note)", () => {
+    const [c] = parseCocCharacters(
+      "Thing, horror STR 90 CON 80 SIZ 70 DEX 60 INT 50 APP — POW 60 EDU — SAN — HP 15 " +
+        "DB: +1D6 Build: 2 Move: 8 MP: 12 Combat " +
+        "Grapple (mnvr) 75% (35/15), held then able to drain (see above) " +
+        "Drain automatic if held, 1D4+2 CON per round (see above) " +
+        "Face-tentacle 85% (42/17), damage 10D6 " +
+        "Howl automatic, 1 point Sanity loss to all who can hear " +
+        "Dodge 45% (22/9)",
+    );
+    const drain = c.combat.find((a) => a.name === "Drain")!;
+    assert.equal(drain.value, null);
+    assert.equal(drain.damage, "1D4+2 CON per round");
+    assert.match(drain.note ?? "", /^automatic if held/);
+    const howl = c.combat.find((a) => a.name === "Howl")!;
+    assert.equal(howl.damage, null);
+    assert.equal(
+      howl.note,
+      "automatic, 1 point Sanity loss to all who can hear",
+    );
+    assert.equal(
+      c.combat.find((a) => a.name === "Grapple (mnvr)")!.note,
+      "held then able to drain (see above)",
+    );
+    assert.equal(
+      c.combat.find((a) => a.name === "Face-tentacle")!.damage,
+      "10D6",
+    );
+  });
+
+  test("prose stating 'an automatic 20 points of damage' is not an attack row", () => {
+    const [c] = parseCocCharacters(
+      "The Black Pharaoh, avatar STR 105 CON 75 SIZ 75 DEX 90 INT 430 APP — POW 500 EDU — SAN — HP 15 " +
+        "DB: +1D6 Build: 2 Move: 9 MP: 100 Combat Attacks per round: 1 per two rounds (energy blast) " +
+        "Fighting: the Black Pharaoh prefers to utilize two hunting horrors. Each blast inflicts an automatic 20 points of damage to a random target. " +
+        "Energy Blast automatic, damage, 20 points Skills Listen 90%.",
+    );
+    assert.deepEqual(
+      c.combat.map((a) => [a.name, a.damage, a.note]),
+      [["Energy Blast", "20 points", "automatic"]],
+    );
+  });
+
+  test("a letter-spaced group title is rejoined ('F l y i n g Polyps')", () => {
+    const cs = parseCocCharacters(
+      "MONSTERS F l y i n g Polyps 1 2 3 STR 240 255 235 CON 120 125 135 SIZ 260 255 250 DEX 80 75 70 " +
+        "INT 85 80 90 POW 90 85 95 HP 38 38 38 DB +5D6 +5D6 +5D6 Build 6 6 6 Move 8 8 8 " +
+        "Combat Fighting 70% (35/14), damage 5D6 Dodge 40% (20/8)",
+    );
+    assert.deepEqual(
+      cs.map((c) => c.name),
+      ["Flying Polyps 1", "Flying Polyps 2", "Flying Polyps 3"],
+    );
+  });
+
+  test("an ALL-CAPS group title does not extend into a mixed-case caption before it", () => {
+    const cs = parseCocCharacters(
+      "An additional 1D4 Sanity points are lost. The Chakota's Dark Spirit " +
+        "CIIMBA, MONSTROUSLY STRONG UNDEAD HORRORS 1 2 STR 90 110 CON 95 35 SIZ 60 45 DEX 65 55 " +
+        "POW 05 05 HP 15 8 DB +1D4 +1D4 Build 1 1 Move 7 7 " +
+        "Combat Fighting 50% (25/10), damage 1D3+DB Dodge 20% (10/4)",
+    );
+    assert.deepEqual(
+      cs.map((c) => c.name),
+      [
+        "Ciimba Monstrously Strong Undead Horrors 1",
+        "Ciimba Monstrously Strong Undead Horrors 2",
+      ],
+    );
+  });
+
+  test("a second profile with the same name is told apart by its descriptor", () => {
+    const cs = parseCocCharacters(
+      "Ssathasaa, serpent person STR 60 CON 55 SIZ 55 DEX 75 INT 90 APP — POW 120 EDU — SAN — HP 11 " +
+        "DB: 0 Build: 0 Move: 8 MP: 24 Luck: 90 " +
+        "Ssathasaa, as Bertha Shipley STR 20 CON 40 SIZ 40 DEX 30 INT 45 APP 45 POW 40 EDU 30 SAN — HP 11 " +
+        "DB: 0 Build: 0 Move: 8 MP: 24 Luck: 90 Combat Attacks per round: 1 " +
+        "Fighting 60% (30/12), damage 1D3 Bite 35% (17/7), damage 1D8 Dodge 37% (18/7) Skills Stealth 60%.",
+    );
+    assert.deepEqual(
+      cs.map((c) => c.name),
+      ["Ssathasaa", "Ssathasaa (as Bertha Shipley)"],
+    );
+  });
+
   test("the generic NPC member-name fallback keeps its acronym", () => {
     // A group table with numeric column labels and no recoverable title.
     const chars = parseCocCharacters(
