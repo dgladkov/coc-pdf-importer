@@ -2988,7 +2988,10 @@ function parseCombat(text: string): CombatEntry[] {
   // Nor a characteristic or "Sanity": prose after a damage ("… 3D10 points of
   // INT per round", "1 point Sanity loss to all who can hear") would otherwise
   // be read as the next attack's name up to a following profile.
-  const attackName = String.raw`${honorific}(?!\d+[dD]\d+\b)(?!DB\b)(?!Combat\b)(?!(?:STR|CON|SIZ|DEX|INT|APP|POW|EDU|SAN|HP|MP|Sanity)\b)\.?[A-Z0-9À-ɏ](?:[A-Za-z0-9 /'"+#*&À-ɏ-]|\([^),]*\)|\.\d)*?`;
+  // Nor a measurement ("8 yards", "30 feet", "20 points"): a range or duration
+  // after a damage ("1D6+1, base range 8 yards Dart (thrown) 40%") is not the
+  // next attack.
+  const attackName = String.raw`${honorific}(?!\d+[dD]\d+\b)(?!DB\b)(?!Combat\b)(?!(?:STR|CON|SIZ|DEX|INT|APP|POW|EDU|SAN|HP|MP|Sanity)\b)(?!\d+\s*(?:yards?|yds?|feet|foot|ft|m|meters?|metres?|miles?|rounds?|minutes?|hours?|points?)\b)\.?[A-Z0-9À-ɏ](?:[A-Za-z0-9 /'"+#*&À-ɏ-]|\([^),]*\)|\.\d)*?`;
   // The start of the next attack, used only to bound the damage of this one. An
   // attack profile is a value followed by a "(half/fifth)" or ", damage". The %
   // is optional (some Dodges read "Dodge 27 (13/5)") and a comma may sit before
@@ -3005,24 +3008,27 @@ function parseCombat(text: string): CombatEntry[] {
   // short run of capitalised words, so a lowercase clause holding the word
   // ("… maws inflict automatic damage") is not read as one.
   const autoAttack = String.raw`(?:[A-Z][A-Za-z'’-]*\s+){0,4}[A-Z][A-Za-z'’-]*\s+[Aa]utomatic\b`;
+  // The Dodge entry bounds what precedes it — the word "Dodge" closing a
+  // parenthetical note ("(target may Dodge)") does not.
+  const dodgeStop = String.raw`Dodge\b(?!\s*\))`;
   // A maneuver row with no skill value, written "Name, effect, damage X"
   // ("Bite/Hold, held, damage 2D6+2") or "Name, effect" ("Grasp, tail wraps
   // victim"): a short capitalised name — not "DB" or a dice term — then a
   // comma and a lowercase clause. Such a row bounds the damage before it.
   const maneuverName = String.raw`(?!DB\b)(?!\d)[A-Z][a-z][A-Za-z/'’-]*(?:\s[A-Z][a-z][A-Za-z/'’-]*){0,2}`;
   const maneuverRow = String.raw`${maneuverName}(?:\s*\([^),]*\))?\s*,\s*[a-z]`;
-  const damage = String.raw`(.+?)(?=\s+${nextAttack}|\s+${autoAttack}|\s+${maneuverRow}|\s+Dodge\b|\s+[•·●⁃]|(?<=\*)\s+\*|\.(?:\s|$)|${proseComma}|$)`;
+  const damage = String.raw`(.+?)(?=\s+${nextAttack}|\s+${autoAttack}|\s+${maneuverRow}|\s+${dodgeStop}|\s+[•·●⁃]|(?<=\*)\s+\*|\.(?:\s|$)|${proseComma}|$)`;
   // A maneuver profile carries a prose effect instead of "damage X" after its
   // "(half/fifth)" ("Garrote 45% (22/9), mnvr. to escape or suffer 1D6 damage
   // per round"). Capture that clause as the note. It runs to the next attack /
   // Dodge / end — not to a sentence period, since it can hold an abbreviation
   // ("mnvr.").
-  const maneuverNote = String.raw`(?!damage\b)(.+?)(?=\s+${nextAttack}|\s+${autoAttack}|\s+Dodge\b|$)`;
+  const maneuverNote = String.raw`(?!damage\b)(.+?)(?=\s+${nextAttack}|\s+${autoAttack}|\s+${dodgeStop}|$)`;
   // A "damage" field left blank by a print error ("... 45% (22/9), damage
   // Thompson SMG 65% ...") — the value is missing before the next attack. Match
   // an empty damage so it reads as null (the importer then fills it in from the
   // matched compendium weapon) rather than swallowing the next weapon's name.
-  const damageOrBlank = String.raw`(?:(?=${nextAttack}|Dodge\b)|${damage})`;
+  const damageOrBlank = String.raw`(?:(?=${nextAttack}|${dodgeStop})|${damage})`;
 
   // An attack is either:
   //  - "NN% (half/fifth)" with optional ", damage X" or ", <maneuver note>",
@@ -3038,10 +3044,10 @@ function parseCombat(text: string): CombatEntry[] {
   // The effect of an auto-hit row written without a "damage" keyword ("Drain
   // automatic if held, 1D4+2 CON per round", "Howl automatic, 1 point Sanity
   // loss to all who can hear"), up to the next row.
-  const autoEffect = String.raw`(.+?)(?=\s+${nextAttack}|\s+${autoAttack}|\s+Dodge\b|$)`;
+  const autoEffect = String.raw`(.+?)(?=\s+${nextAttack}|\s+${autoAttack}|\s+${dodgeStop}|$)`;
   // The effect clause of a maneuver row without a skill value, up to the row
   // that follows.
-  const rowEffect = String.raw`([a-z][^%]{2,120}?)(?=\s+${nextAttack}|\s+${autoAttack}|\s+${maneuverRow}|\s+Dodge\b|\.(?:\s|$)|$)`;
+  const rowEffect = String.raw`([a-z][^%]{2,120}?)(?=\s+${nextAttack}|\s+${autoAttack}|\s+${maneuverRow}|\s+${dodgeStop}|\.(?:\s|$)|$)`;
   const re = new RegExp(
     String.raw`(${attackName})(?:\s+(?:(\d{1,3})\s*%?\s*,?\s*(?:\(\s*(\d{1,3})\s*\/\s*(\d{1,3})\s*\)(?:\s*,?\s*damage\s+${damageOrBlank}|\s*,\s*${maneuverNote})?|damage\s+${damage})|damage\s+(?=\d)${damage}|[Aa]utomatic\b${autoCondition}(?:\s*,?\s*damage[,]?\s+${damage}|\s*,\s*${autoEffect}))|\s*,\s*(?:(?:([a-z][^,%]{1,60}?),\s*)?damage\s+(?=\d)${damage}|${rowEffect}))`,
     "g",

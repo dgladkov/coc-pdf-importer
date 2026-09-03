@@ -1762,6 +1762,24 @@ describe("parseCocCharacters (unit)", () => {
     );
   });
 
+  test("a range after a damage is its note, not the next attack's name", () => {
+    const [c] = parseCocCharacters(
+      "Hireling, thug " +
+        STATS +
+        " Combat Hatchet (thrown) 40% (20/8), damage 1D6+1, base range 8 yards Dart (thrown) 40% (20/8), damage 1D3 + poison " +
+        "Eye Ray 50% (25/10), damage 1D10, range 30 feet Dodge 45% (22/9)",
+    );
+    assert.deepEqual(
+      c.combat.map((a) => [a.name, a.damage, a.note]),
+      [
+        ["Hatchet (thrown)", "1D6+1", "base range 8 yards"],
+        ["Dart (thrown)", "1D3 + poison", null],
+        ["Eye Ray", "1D10", "range 30 feet"],
+        ["Dodge", null, null],
+      ],
+    );
+  });
+
   test("the generic NPC member-name fallback keeps its acronym", () => {
     // A group table with numeric column labels and no recoverable title.
     const chars = parseCocCharacters(
