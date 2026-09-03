@@ -4,8 +4,8 @@
 //
 // Shows the current version, prompts for the new one (default: next patch),
 // then writes it to module.json (with `download` pointed at the versioned
-// asset URL) and package.json, and commits both as "Release <version>" — the
-// shape the release workflow detects. Nothing is pushed or tagged here: push
+// asset URL), package.json and package-lock.json, and commits them as
+// "Release <version>" — the shape the release workflow detects. Nothing is pushed or tagged here: push
 // main and the workflow tags, builds and publishes the release.
 import fs from "node:fs";
 import process from "node:process";
@@ -46,6 +46,7 @@ async function ask(prompt) {
 
 const MODULE = "module.json";
 const PACKAGE = "package.json";
+const LOCK = "package-lock.json";
 const SEMVER = /^\d+\.\d+\.\d+$/;
 
 function git(...args) {
@@ -78,6 +79,20 @@ function setJsonField(file, key, value) {
   fs.writeFileSync(file, text.replace(re, `$1${value}$3`));
 }
 
+// package-lock.json records the version twice: at the top level and in the
+// root package entry (`packages[""]`). Rewrite both in place; anything else
+// named "version" in the file belongs to a dependency.
+function setLockVersion(file, value) {
+  let text = fs.readFileSync(file, "utf8");
+  const root = /^(  "version": ")([^"]*)(")/m;
+  const entry = /("packages":\s*\{\s*"":\s*\{[^}]*?"version":\s*")([^"]*)(")/;
+  if (!root.test(text))
+    fail(`${file}: no top-level "version" field to update.`);
+  if (!entry.test(text)) fail(`${file}: no root package "version" to update.`);
+  text = text.replace(root, `$1${value}$3`).replace(entry, `$1${value}$3`);
+  fs.writeFileSync(file, text);
+}
+
 // The versioned asset URL, derived from the manifest's own repository URL so
 // the script needs no configuration.
 function downloadUrl(manifest, version) {
@@ -90,6 +105,7 @@ function downloadUrl(manifest, version) {
 
 const manifest = JSON.parse(fs.readFileSync(MODULE, "utf8"));
 const pkg = JSON.parse(fs.readFileSync(PACKAGE, "utf8"));
+const lock = JSON.parse(fs.readFileSync(LOCK, "utf8"));
 const current = manifest.version;
 
 // Preconditions: a clean tree on main, so the release commit holds only the
@@ -122,6 +138,7 @@ console.log(`\nWill commit "Release ${version}":`);
 console.log(`  ${MODULE}: version ${current} -> ${version}`);
 console.log(`  ${MODULE}: download -> ${download}`);
 console.log(`  ${PACKAGE}: version ${pkg.version} -> ${version}`);
+console.log(`  ${LOCK}: version ${lock.version} -> ${version}`);
 const go = await ask("Proceed? [y/N] ");
 rl.close();
 if (!go || !/^y(es)?$/i.test(go)) fail("Aborted.");
@@ -129,7 +146,8 @@ if (!go || !/^y(es)?$/i.test(go)) fail("Aborted.");
 setJsonField(MODULE, "version", version);
 setJsonField(MODULE, "download", download);
 setJsonField(PACKAGE, "version", version);
-git("add", MODULE, PACKAGE);
+setLockVersion(LOCK, version);
+git("add", MODULE, PACKAGE, LOCK);
 git("commit", "-q", "-m", `Release ${version}`);
 console.log(`\n${git("log", "-1", "--format=%h %s")}`);
 console.log(
