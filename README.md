@@ -174,9 +174,9 @@ Foundry user data folder (e.g. `/Users/YOU/foundrydata`). Builds then land in
 - `npm run build:module` — **release** build → `build/module.zip` +
   `build/module.json` (requires 7-Zip)
 - `npm run release` — interactive: shows the current version, asks for the new
-  one, and commits the version bump (`module.json` + `package.json`) as
-  `Release <version>`; pushing `main` then lets the release workflow tag,
-  build and publish it
+  one, and commits the version bump (`module.json` + `package.json` +
+  `package-lock.json`) as `Release <version>`; pushing `main` then lets the
+  release workflow tag, build and publish it
 - `npm run type-check` — `tsc --noEmit` over `src/`, `test/`, `tools/`
 - `npm test` — unit tests (fast, fixture-free, CI)
 - `npm run test:integration` — book-level tests + golden snapshots — **needs the
@@ -230,3 +230,18 @@ Without the worker shim, text extraction silently truncates glyph runs.
   manifest URL can point at it while the download URL points at `module.zip`.
 
 7-Zip must be installed (`7z` or `7zz` on PATH).
+
+### Releasing
+
+Pushing a `Release <version>` commit to `main` (see `npm run release`) runs the
+release workflow, which tags the version, builds the module, and creates the
+GitHub release with `module.zip` and `module.json` attached. It then publishes
+the version to the [Foundry VTT package listing](https://foundryvtt.com/packages/coc-pdf-importer)
+through the Package Release API, pointing at that release's own `module.json`
+asset and its release page, with the compatibility range taken from
+`module.json` (`maximum` only when declared there).
+
+The Foundry step needs a `FOUNDRY_RELEASE_TOKEN` repository secret holding the
+package's release token (`fvttp_…`, generated on the package's foundryvtt.com
+page); without it the step is skipped with a warning and the GitHub release
+still goes out.

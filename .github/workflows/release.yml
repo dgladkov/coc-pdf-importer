@@ -11,6 +11,13 @@ name: Release
 #   …
 #
 #   **Full Changelog**: https://github.com/<repo>/compare/<prev>...<version>
+#
+# Once the GitHub release exists, the version is also published to the Foundry
+# VTT package listing through the Package Release API, pointing at this
+# release's manifest asset and notes page, with the compatibility range from
+# module.json. That step needs a FOUNDRY_RELEASE_TOKEN repository secret (the
+# package's "fvttp_…" release token from its foundryvtt.com package page) and
+# is skipped, with a warning, when the secret is absent.
 
 on:
   push:
@@ -121,3 +128,61 @@ jobs:
           # read/write to create releases; a RELEASE_TOKEN secret (a PAT with
           # Contents: read & write) works regardless, when present.
           token: ${{ secrets.RELEASE_TOKEN || github.token }}
+
+      - if: steps.version.outputs.release == 'true'
+        name: Publish to the Foundry VTT package listing
+        env:
+          FOUNDRY_RELEASE_TOKEN: ${{ secrets.FOUNDRY_RELEASE_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ -z "$FOUNDRY_RELEASE_TOKEN" ]; then
+            echo "::warning::FOUNDRY_RELEASE_TOKEN is not set; skipping the Foundry package release."
+            exit 0
+          fi
+          node --input-type=module <<'EOF'
+          import fs from "node:fs";
+          const { id, compatibility } = JSON.parse(fs.readFileSync("module.json", "utf8"));
+          const { VERSION, REPOSITORY, FOUNDRY_RELEASE_TOKEN } = process.env;
+          const base = `https://github.com/${REPOSITORY}/releases`;
+          // The manifest must be this release's own asset, never the "latest"
+          // redirect; the notes are the release page. "maximum" is sent only when
+          // module.json declares one.
+          const body = {
+            id,
+            release: {
+              version: VERSION,
+              manifest: `${base}/download/${VERSION}/module.json`,
+              notes: `${base}/tag/${VERSION}`,
+              compatibility: {
+                minimum: compatibility.minimum,
+                verified: compatibility.verified,
+                ...(compatibility.maximum ? { maximum: compatibility.maximum } : {}),
+              },
+            },
+          };
+          console.log("Foundry release request:", JSON.stringify(body, null, 2));
+          const post = () =>
+            fetch("https://foundryvtt.com/_api/packages/release_version/", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: FOUNDRY_RELEASE_TOKEN,
+              },
+              body: JSON.stringify(body),
+            });
+          let response = await post();
+          if (response.status === 429) {
+            const wait = Number(response.headers.get("retry-after") || 30);
+            console.log(`Rate limited; retrying after ${wait}s.`);
+            await new Promise((r) => setTimeout(r, wait * 1000));
+            response = await post();
+          }
+          const text = await response.text();
+          console.log(`Foundry API ${response.status}: ${text}`);
+          if (!response.ok) {
+            console.error(`::error::Foundry package release failed (${response.status}).`);
+            process.exit(1);
+          }
+          EOF
