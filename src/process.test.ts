@@ -1537,6 +1537,173 @@ describe("parseCocCharacters (unit)", () => {
     assert.equal(cs[2].characteristics.HP!.value, 11);
   });
 
+  test("a group table's single 'Average …' derived line is every member's", () => {
+    const cs = parseCocCharacters(
+      "COWBOYS #1 #2 #3 STR 70 55 65 CON 60 65 55 SIZ 70 65 75 DEX 70 60 50 INT 60 65 55 APP 60 50 45 POW 55 50 60 EDU 50 55 50 SAN 55 50 60 HP 13 13 13 " +
+        "Average Damage Bonus (DB): +1D4 Average Build: 1 Average Move: 8 Average Magic Points: 11 " +
+        "Combat Brawl 50% (25/10), damage 1D3+DB Dodge 40% (20/8) Skills Ride 70%.",
+    );
+    assert.equal(cs.length, 3);
+    for (const c of cs)
+      assert.deepEqual(c.derived, {
+        DB: "+1D4",
+        Build: 1,
+        Move: 8,
+        MP: 11,
+        Luck: null,
+      });
+    assert.equal(cs[2].characteristics.HP!.value, 13);
+  });
+
+  test("a stat line followed by pages of prose does not inherit the next block's sections", () => {
+    const cs = parseCocCharacters(
+      "Emily Webster, age 24, talent agent " +
+        STATS +
+        " " +
+        "Alternatively, if the investigator does not have the mask, they may need to quickly convince whoever does possess it to leave. ".repeat(
+          6,
+        ) +
+        "Anna Konrad, age 22, budding songstress " +
+        STATS +
+        " Combat Brawl 25% (12/5), damage 1D3 Skills Art/Craft (Singing) 75%, Charm 60%.",
+    );
+    assert.deepEqual(
+      cs.map((c) => c.name),
+      ["Emily Webster", "Anna Konrad"],
+    );
+    assert.deepEqual(cs[0].skills, {});
+    assert.equal(cs[1].skills["Charm"], 60);
+  });
+
+  test("a profile reprinted later in the book is one actor, filled in from the reprint", () => {
+    const cs = parseCocCharacters(
+      "Emily Webster, age 24, talent agent " +
+        STATS +
+        " " +
+        "Alternatively, if the investigator does not have the mask, they may need to convince whoever does possess it to leave. ".repeat(
+          6,
+        ) +
+        "Highball, age 6, faithful companion STR 45 CON 55 SIZ 40 DEX 70 INT — APP — POW 35 EDU — SAN — HP 9 DB: 0 Build: 0 Move: 12 MP: 7 Combat Bite 50% (25/10), damage 1D6 Dodge 45% (22/9) " +
+        "Emily Webster, age 24, talent agent " +
+        STATS +
+        " Combat Brawl 25% (12/5), damage 1D3 Dodge 30% (15/6) Skills Accounting 50%, Fast Talk 65%. " +
+        "Highball, age 6, faithful companion STR 45 CON 55 SIZ 40 DEX 70 INT — APP — POW 35 EDU — SAN — HP 9 DB: 0 Build: 0 Move: 12 MP: 7 Combat Bite 50% (25/10), damage 1D6 Dodge 45% (22/9) Skills Listen 75%, Track 70%.",
+    );
+    assert.deepEqual(
+      cs.map((c) => c.name),
+      ["Emily Webster", "Highball"],
+    );
+    assert.equal(cs[0].skills["Fast Talk"], 65);
+    assert.deepEqual(
+      cs[0].combat.map((a) => a.name),
+      ["Brawl", "Dodge"],
+    );
+    assert.equal(cs[1].skills["Track"], 70);
+  });
+
+  test("two different profiles with one name are told apart", () => {
+    const cs = parseCocCharacters(
+      "Hunting Horror, beast STR 145 CON 50 SIZ 205 DEX 65 INT 75 APP — POW 105 EDU — SAN — HP 25 DB: +3D6 Build: 4 Move: 7 MP: 21 Combat Fighting 65% (32/13), damage 1D6+3D6 Dodge 35% (17/7) Sanity loss: 0/1D10 to see it. " +
+        "Hunting Horror, beast STR 145 CON 60 SIZ 200 DEX 80 INT 70 APP — POW 100 EDU — SAN — HP 26 DB: +3D6 Build: 4 Move: 7 MP: 20 Combat Fighting 80% (40/16), damage 1D6+3D6 Dodge 40% (20/8) Sanity loss: 0/1D10 to see it.",
+    );
+    assert.deepEqual(
+      cs.map((c) => c.name),
+      ["Hunting Horror", "Hunting Horror (2)"],
+    );
+  });
+
+  test("maneuver rows with no skill value are their own attacks, and bound the damage before them", () => {
+    const S =
+      "STR 145 CON 80 SIZ 145 DEX 60 INT 25 APP — POW 70 EDU — SAN — HP 22 DB: +5D6 Build: 6 Move: 6 MP: 14 ";
+    const [shantak] = parseCocCharacters(
+      "Shantak, beast " +
+        S +
+        "Combat Attacks per round: 1 Fighting 45% (22/9), damage 1D6+4D6 Bite/Hold (mnvr), held, damage 2D6+2, 1D6 per round thereafter Bite Automatic (if seized), damage 3D10 STR drain per round Dodge 25% (12/5)",
+    );
+    assert.deepEqual(
+      shantak.combat.map((a) => [a.name, a.value, a.damage, a.note]),
+      [
+        ["Fighting", 45, "1D6+4D6", null],
+        ["Bite/Hold (mnvr)", null, "2D6+2, 1D6 per round thereafter", "held"],
+        ["Bite", null, "3D10 STR drain per round", "automatic (if seized)"],
+        ["Dodge", 25, null, null],
+      ],
+    );
+    const [horror] = parseCocCharacters(
+      "Hunting Horror, beast " +
+        S +
+        "Combat Fighting 80% (40/16), damage 1D6+3D6 Grasp (mnvr), tail wraps victim, who is unable to move Dodge 40% (20/8)",
+    );
+    assert.deepEqual(
+      horror.combat.map((a) => [a.name, a.value, a.damage, a.note]),
+      [
+        ["Fighting", 80, "1D6+3D6", null],
+        [
+          "Grasp (mnvr)",
+          null,
+          null,
+          "tail wraps victim, who is unable to move",
+        ],
+        ["Dodge", 40, null, null],
+      ],
+    );
+    // Capitalised prose with a comma is not a row.
+    const [npc] = parseCocCharacters(
+      "Jane Doe, 30, clerk " +
+        STATS +
+        " Combat Brawl 40% (20/8), damage 1D3 Dodge 30% (15/6) Her academic nature, and love of learning, meant that she did well. Lately, Lima has called.",
+    );
+    assert.deepEqual(
+      npc.combat.map((a) => a.name),
+      ["Brawl", "Dodge"],
+    );
+  });
+
+  test("a footnote after damage is not part of it", () => {
+    const [c] = parseCocCharacters(
+      "Rattlesnakes, pests " +
+        STATS +
+        " Combat Bite 40% (20/8), damage 1D2+poison* *A rattlesnake's bite injects strong poison causing 2D10 damage.",
+    );
+    assert.deepEqual(
+      c.combat.map((a) => [a.name, a.damage]),
+      [["Bite", "1D2+poison"]],
+    );
+  });
+
+  test("an ALL-CAPS name with a mixed-case parenthetical is proper-cased", () => {
+    const { text, chunks } = chunked([
+      { t: "Jane Doe, 30, clerk", h: 11 },
+      { t: STATS + " Combat Brawl 40% (20/8), damage 1D3 Skills Charm 40%." },
+      { t: "THE CRAWLING ONE (AKA Señor Diego Guiterrez de Almacan)", h: 11 },
+      { t: STATS + " Combat Fighting 80% (40/16), damage 1D3+1D4" },
+    ]);
+    const cs = parseCocCharacters(text, chunks);
+    assert.equal(
+      cs[1].name,
+      "The Crawling One (AKA Señor Diego Guiterrez de Almacan)",
+    );
+  });
+
+  test("a pre-gen's gear list and 'Player Notes' close its background sections", () => {
+    const [c] = parseCocCharacters(
+      "STANLEY ACE, Boxer, age 30 " +
+        STATS +
+        " Combat Brawl 60% (30/12), damage 1D3 Skills Fighting (Brawl) 60%. " +
+        "• Description: large and muscular. • Traits: friendly. • Significant People: his coach. • Treasured Possessions: a lucky glove. " +
+        "Equipment Boxing gloves and gym kit, camera, $10 on hand. Player Notes:",
+    );
+    assert.match(
+      c.background.find((b) => b.title === "Treasured Possession")!.text,
+      /^a lucky glove\.?$/,
+    );
+    assert.deepEqual(c.items, [
+      "Boxing gloves and gym kit",
+      "camera",
+      "$10 on hand",
+    ]);
+  });
+
   test("the generic NPC member-name fallback keeps its acronym", () => {
     // A group table with numeric column labels and no recoverable title.
     const chars = parseCocCharacters(

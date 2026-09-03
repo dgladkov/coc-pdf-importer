@@ -431,7 +431,7 @@ export function parseCocCharacters(
     // sections. (A block with sections of its own is kept; only its name is
     // bad.)
     let sharedTail = "";
-    if (!bodyHasSections(block.body)) {
+    if (!bodyHasSections(block.body) && clean(block.body).length <= 500) {
       if (CONNECTOR_DESCRIPTION.test(description.trim())) return;
       for (let j = i + 1; j < blocks.length; j++) {
         if (bodyHasSections(blocks[j].body)) {
@@ -556,16 +556,52 @@ export function parseCocCharacters(
 // with it: "Ssathasaa (as Bertha Shipley)". A same-descriptor reprint is left
 // alone (it is the same profile).
 function disambiguateNames(characters: CocCharacter[]): CocCharacter[] {
-  const first = new Map<string, string>();
-  return characters.map((c) => {
+  const out: CocCharacter[] = [];
+  const first = new Map<string, CocCharacter>();
+  const count = new Map<string, number>();
+  for (const c of characters) {
     const seen = first.get(c.name);
-    if (seen === undefined) {
-      first.set(c.name, c.description);
-      return c;
+    if (!seen) {
+      first.set(c.name, c);
+      count.set(c.name, 1);
+      out.push(c);
+      continue;
     }
-    if (!c.description || c.description === seen) return c;
-    return { ...c, name: `${c.name} (${c.description})` };
-  });
+    // A reprint (a scenario's NPCs listed again in an appendix): one actor,
+    // taking from the second copy whatever the first copy's page cut off.
+    if (
+      seen.description === c.description &&
+      JSON.stringify(seen.characteristics) === JSON.stringify(c.characteristics)
+    ) {
+      if (seen.age == null) seen.age = c.age;
+      if (!Object.keys(seen.skills).length) seen.skills = c.skills;
+      if (!seen.combat.length) seen.combat = c.combat;
+      if (!seen.spells.length) seen.spells = c.spells;
+      if (!seen.items.length) seen.items = c.items;
+      if (!seen.background.length) seen.background = c.background;
+      if (seen.sanityLoss == null) seen.sanityLoss = c.sanityLoss;
+      if (seen.armor == null) seen.armor = c.armor;
+      if (seen.attacksPerRound == null)
+        seen.attacksPerRound = c.attacksPerRound;
+      if (seen.derived.MP == null && seen.derived.Move == null)
+        seen.derived = {
+          ...c.derived,
+          Luck: seen.derived.Luck ?? c.derived.Luck,
+        };
+      if (!seen.pulp && c.pulp) seen.pulp = c.pulp;
+      continue;
+    }
+    const n = (count.get(c.name) ?? 1) + 1;
+    count.set(c.name, n);
+    out.push({
+      ...c,
+      name:
+        c.description && c.description !== seen.description
+          ? `${c.name} (${c.description})`
+          : `${c.name} (${n})`,
+    });
+  }
+  return out;
 }
 
 // A block that isn't really an actor: its name was picked out of a prose/credits
@@ -621,7 +657,13 @@ function cleanActorName(name: string): string {
   // proper-case those so they read naturally. A name already in mixed case
   // (most books) is left untouched so an intentional internal capital (e.g.
   // "McDonald") is never mangled.
-  return isAllCapsName(cleaned) ? titleCaseTitle(cleaned) : cleaned;
+  if (isAllCapsName(cleaned)) return titleCaseTitle(cleaned);
+  // "THE CRAWLING ONE (AKA Señor Diego …)": the name is caps, its
+  // parenthetical is not.
+  const paren = cleaned.indexOf("(");
+  if (paren > 0 && isAllCapsName(cleaned.slice(0, paren).trim()))
+    return `${titleCaseTitle(cleaned.slice(0, paren).trim())} ${cleaned.slice(paren)}`;
+  return cleaned;
 }
 
 // A quote mark left dangling by name-extraction truncating before its partner
@@ -1363,6 +1405,10 @@ function parseBlock(
 ): CocCharacter[] {
   // Rewrite spelled-out derived labels here (done per block so global text
   // offsets used for name detection stay stable).
+  // A group table's derived stats printed once as averages ("Average Damage
+  // Bonus (DB): +1D4 Average Build: 1 …") apply to every member.
+  const sharedDerived =
+    /\bAverage\s+(?:Damage\s+Bonus|Build|Move|Magic\s+Points?)\b/i.test(body);
   body = normalizeLabels(body);
   body = expandLanguageList(body);
   // The body as printed, for the background sections: the HP line that
@@ -1422,8 +1468,12 @@ function parseBlock(
       sectionBody(fallback, "Spells") ||
       sectionBody(sharedTail, "Spells"),
   );
-  const sanityLoss = parseSanityLoss(body) || parseSanityLoss(sharedTail);
-  const armor = parseArmor(body) || parseArmor(sharedTail);
+  const sanityLoss =
+    parseSanityLoss(body) ||
+    parseSanityLoss(fallback) ||
+    parseSanityLoss(sharedTail);
+  const armor =
+    parseArmor(body) || parseArmor(fallback) || parseArmor(sharedTail);
   // Background sections mark a real investigator only when the block carries the
   // human characteristics an investigator sheet requires (APP and EDU). Monsters
   // and animals leave these as "—"; when such a creature's unbounded body bleeds
@@ -1534,7 +1584,7 @@ function parseBlock(
       // prose (dropped); a descriptor parsed off the group's own heading is not.
       description: groupDescription,
       characteristics: characteristicsForColumn(cols, j),
-      derived: derivedForColumn(cols, j),
+      derived: derivedForColumn(cols, j, sharedDerived),
       attacksPerRound,
       combat,
       skills,
@@ -1793,15 +1843,18 @@ function characteristicsForColumn(
 function derivedForColumn(
   cols: Map<string, string[]>,
   j: number,
+  shared = false,
 ): DerivedStats {
-  const db = (pick(cols, "DB", j) ?? "").replace(/\s+/g, "").toUpperCase();
+  const db = (pick(cols, "DB", j, shared) ?? "")
+    .replace(/\s+/g, "")
+    .toUpperCase();
   return {
     // Keep only a real damage bonus ("+1D4", "-2", "0"); "None"/"-"/etc. -> null.
     DB: /^[+-]?(\d+|\d*D\d+([+-]\d+)?)$/.test(db) ? db : null,
-    Build: numeric(pick(cols, "Build", j)),
-    Move: numeric(pick(cols, "Move", j)),
-    MP: numeric(pick(cols, "MP", j)),
-    Luck: numeric(pick(cols, "Luck", j)),
+    Build: numeric(pick(cols, "Build", j, shared)),
+    Move: numeric(pick(cols, "Move", j, shared)),
+    MP: numeric(pick(cols, "MP", j, shared)),
+    Luck: numeric(pick(cols, "Luck", j, shared)),
   };
 }
 
@@ -1809,9 +1862,14 @@ function pick(
   cols: Map<string, string[]>,
   label: DerivedLabel,
   j: number,
+  shared = false,
 ): string | null {
   const values = cols.get(label);
-  return values && values[j] !== undefined ? values[j] : null;
+  if (!values) return null;
+  // A group table's single "Average Damage Bonus (DB): +1D4 Average Build: 1
+  // …" line is every member's.
+  if (shared && values.length === 1) return values[0];
+  return values[j] !== undefined ? values[j] : null;
 }
 
 function numeric(raw: string | null): number | null {
@@ -2719,6 +2777,12 @@ function parseBackground(body: string): BackgroundSection[] {
     // Innsmouth's "HP 13 DB 0 Build 0 Move 8 MP 10" line closes the block.
     const hpLine = DERIVED_LINE.exec(rest);
     if (hpLine) core = Math.min(core, textStart + hpLine.index);
+    // A pre-gen's gear list ("Equipment …") and the sheet's "Player Notes:"
+    // close them too.
+    const gear = /\b(?:Equipment|Possessions|Player\s+Notes?)\b/.exec(
+      maskParens(rest),
+    );
+    if (gear) core = Math.min(core, textStart + gear.index);
     // Drop bullet markers (these sheets separate the fill-in prompts with "•")
     // and a leading colon ("Personal Description: ...").
     const text = clean(
@@ -2927,7 +2991,13 @@ function parseCombat(text: string): CombatEntry[] {
   // short run of capitalised words, so a lowercase clause holding the word
   // ("… maws inflict automatic damage") is not read as one.
   const autoAttack = String.raw`(?:[A-Z][A-Za-z'’-]*\s+){0,4}[A-Z][A-Za-z'’-]*\s+[Aa]utomatic\b`;
-  const damage = String.raw`(.+?)(?=\s+${nextAttack}|\s+${autoAttack}|\s+Dodge\b|\.(?:\s|$)|${proseComma}|$)`;
+  // A maneuver row with no skill value, written "Name, effect, damage X"
+  // ("Bite/Hold, held, damage 2D6+2") or "Name, effect" ("Grasp, tail wraps
+  // victim"): a short capitalised name — not "DB" or a dice term — then a
+  // comma and a lowercase clause. Such a row bounds the damage before it.
+  const maneuverName = String.raw`(?!DB\b)(?!\d)[A-Z][a-z][A-Za-z/'’-]*(?:\s[A-Z][a-z][A-Za-z/'’-]*){0,2}`;
+  const maneuverRow = String.raw`${maneuverName}(?:\s*\([^),]*\))?\s*,\s*[a-z]`;
+  const damage = String.raw`(.+?)(?=\s+${nextAttack}|\s+${autoAttack}|\s+${maneuverRow}|\s+Dodge\b|(?<=\*)\s+\*|\.(?:\s|$)|${proseComma}|$)`;
   // A maneuver profile carries a prose effect instead of "damage X" after its
   // "(half/fifth)" ("Garrote 45% (22/9), mnvr. to escape or suffer 1D6 damage
   // per round"). Capture that clause as the note. It runs to the next attack /
@@ -2955,13 +3025,29 @@ function parseCombat(text: string): CombatEntry[] {
   // automatic if held, 1D4+2 CON per round", "Howl automatic, 1 point Sanity
   // loss to all who can hear"), up to the next row.
   const autoEffect = String.raw`(.+?)(?=\s+${nextAttack}|\s+${autoAttack}|\s+Dodge\b|$)`;
+  // The effect clause of a maneuver row without a skill value, up to the row
+  // that follows.
+  const rowEffect = String.raw`([a-z][^%]{2,120}?)(?=\s+${nextAttack}|\s+${autoAttack}|\s+${maneuverRow}|\s+Dodge\b|\.(?:\s|$)|$)`;
   const re = new RegExp(
-    String.raw`(${attackName})\s+(?:(\d{1,3})\s*%?\s*,?\s*(?:\(\s*(\d{1,3})\s*\/\s*(\d{1,3})\s*\)(?:\s*,?\s*damage\s+${damageOrBlank}|\s*,\s*${maneuverNote})?|damage\s+${damage})|damage\s+(?=\d)${damage}|[Aa]utomatic\b${autoCondition}(?:\s*,?\s*damage[,]?\s+${damage}|\s*,\s*${autoEffect}))`,
+    String.raw`(${attackName})(?:\s+(?:(\d{1,3})\s*%?\s*,?\s*(?:\(\s*(\d{1,3})\s*\/\s*(\d{1,3})\s*\)(?:\s*,?\s*damage\s+${damageOrBlank}|\s*,\s*${maneuverNote})?|damage\s+${damage})|damage\s+(?=\d)${damage}|[Aa]utomatic\b${autoCondition}(?:\s*,?\s*damage[,]?\s+${damage}|\s*,\s*${autoEffect}))|\s*,\s*(?:(?:([a-z][^,%]{1,60}?),\s*)?damage\s+(?=\d)${damage}|${rowEffect}))`,
     "g",
   );
 
   const out: CombatEntry[] = [];
+  // A maneuver row without a skill value is only such a row when its name is a
+  // short capitalised run (not prose) and — with no "damage" keyword to
+  // anchor it — when it follows the previous row directly.
+  const rowName = new RegExp(String.raw`^${maneuverName}(?:\s*\([^),]*\))?$`);
+  let lastEnd = -1;
   for (const match of text.matchAll(re)) {
+    const commaRow = match[13] !== undefined || match[14] !== undefined;
+    if (commaRow && !rowName.test(match[1].trim())) continue;
+    if (
+      match[14] !== undefined &&
+      (lastEnd < 0 || !/^\s*$/.test(text.slice(lastEnd, match.index)))
+    )
+      continue;
+    lastEnd = match.index! + match[0].length;
     const value = match[2] !== undefined ? Number(match[2]) : null;
     let half = match[3] !== undefined ? Number(match[3]) : null;
     let fifth = match[4] !== undefined ? Number(match[4]) : null;
@@ -2979,20 +3065,34 @@ function parseCombat(text: string): CombatEntry[] {
         match[7] ??
         match[8] ??
         match[10] ??
+        match[13] ??
         (effectIsDamage ? effect : undefined),
     );
-    const maneuver = match[6] ? clean(match[6]) : null;
+    // A maneuver row without a skill value: its clause is the note.
+    const rowClause = match[12] ?? match[14];
+    const maneuver = match[6]
+      ? clean(match[6])
+      : rowClause !== undefined
+        ? clean(rowClause)
+        : null;
     let auto: string | null = null;
     if (match[10] !== undefined || effect !== undefined) {
       auto = match[9] ? `automatic ${clean(match[9])}` : "automatic";
       if (effect !== undefined && !effectIsDamage) auto += `, ${effect}`;
     }
+    let name = cleanCombatName(match[1]);
+    // "Bite Automatic (if seized), damage 3D10": the condition is the note.
+    const autoName = /^(.+?)\s+Automatic\s*\(([^)]*)\)$/i.exec(name);
+    if (autoName) {
+      name = autoName[1];
+      auto = `automatic (${clean(autoName[2])})`;
+    }
     out.push({
-      name: cleanCombatName(match[1]),
+      name,
       value,
       half,
       fifth,
-      damage,
+      damage: damage?.replace(/\*+$/, "") ?? null,
       // An auto-hit row's note leads with its "automatic …" reading; a
       // parenthetical from the damage ("(see above)") follows it.
       note:
