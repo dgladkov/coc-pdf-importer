@@ -1704,6 +1704,64 @@ describe("parseCocCharacters (unit)", () => {
     ]);
   });
 
+  test("effect prose after a dice damage is the note; alternatives and further dice stay", () => {
+    const [c] = parseCocCharacters(
+      "Servant, cultist " +
+        STATS +
+        " Combat Garrote 45% (22/9), damage 1D6, victim requires a successful maneuver to break free " +
+        "Tentacle 50% (25/10), damage 1D10 when held; in following round the maws bite " +
+        "Brawl 40% (20/8), damage 1D3+DB, or knife 1D4+2 Bite 30% (15/6), damage 2D6+2, 1D6 per round thereafter Dodge 30% (15/6)",
+    );
+    assert.deepEqual(
+      c.combat.map((a) => [a.name, a.damage, a.note]),
+      [
+        [
+          "Garrote",
+          "1D6",
+          "victim requires a successful maneuver to break free",
+        ],
+        ["Tentacle", "1D10", "when held; in following round the maws bite"],
+        ["Brawl", "1D3+DB", null],
+        ["Knife", "1D4+2", null],
+        ["Bite", "2D6+2, 1D6 per round thereafter", null],
+        ["Dodge", null, null],
+      ],
+    );
+  });
+
+  test("a next section's ALL-CAPS title at the foot of a background section is dropped", () => {
+    const [c] = parseCocCharacters(
+      "RANDALL SAVAGE, Age 40, Big Game Hunter " +
+        STATS +
+        " Combat Brawl 50% (25/10), damage 1D3 " +
+        "• Traits: Brave, sometimes reckless. PORTRAITS OF RECURRING NON-PLAYER CHARACTERS",
+    );
+    assert.equal(
+      c.background.find((b) => b.title === "Traits")!.text,
+      "Brave, sometimes reckless.",
+    );
+  });
+
+  test("a cross-reference after a spell list is not a spell", () => {
+    const [c] = parseCocCharacters(
+      "Barnabas Marsh age 67, town patriarch " +
+        STATS +
+        " Skills Charm 40%. Spells Contact Deep One, Grasp of Cthulhu. See Grimoire of Cthulhu Mythos Magic for details. COMBAT % damage Fighting 30% (15/6) damage 1D3",
+    );
+    assert.deepEqual(c.spells, ["Contact Deep One", "Grasp of Cthulhu"]);
+  });
+
+  test("an abbreviation's unmappable periods are restored ('THE U � S � MARSHALS')", () => {
+    const cs = parseCocCharacters(
+      "THE U \uFFFD S \uFFFD MARSHALS Kirby Reese STR 65 75 CON 60 65 SIZ 70 65 DEX 60 55 INT 55 60 APP 50 55 POW 50 60 EDU 45 50 SAN 50 60 HP 13 13 " +
+        "DB: +1D4 +1D4 Build: 1 1 Move: 8 8 MP: 10 12 Combat Brawl 50% (25/10), damage 1D3+DB Dodge 30% (15/6)",
+    );
+    assert.deepEqual(
+      cs.map((c) => c.name),
+      ["The U.S. Marshals Kirby", "The U.S. Marshals Reese"],
+    );
+  });
+
   test("the generic NPC member-name fallback keeps its acronym", () => {
     // A group table with numeric column labels and no recoverable title.
     const chars = parseCocCharacters(

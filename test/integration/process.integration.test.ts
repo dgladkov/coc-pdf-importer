@@ -176,7 +176,7 @@ describe("Masks of Nyarlathotep", () => {
     assert.ok(byName(chars, "Sir Aubrey Penhew"));
     // Abbreviations / initials are still preserved.
     assert.ok(byName(chars, "Dr. Mordecai Lemming"));
-    assert.ok(byName(chars, "Robert B. F. Mackenzie"));
+    assert.ok(byName(chars, "Robert B.F. Mackenzie"));
   });
 
   test("Edward Gavigan — comma-separated spell list", () => {

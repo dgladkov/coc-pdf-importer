@@ -649,6 +649,9 @@ function cleanActorName(name: string): string {
     .replace(/^(?:Notable Folk\s+)?M\s+(?=[A-Z"'])/, "")
     .replace(/^(?:Profiles?|Pulp):\s*/i, "");
   cleaned = stripUnpairedQuote(cleaned).replace(/^["“](.+)["”]$/, "$1");
+  // Spaced initials read as one abbreviation ("U. S. MARSHALS" -> "U.S.",
+  // "Robert B. F. Mackenzie" -> "Robert B.F. Mackenzie").
+  cleaned = cleaned.replace(/\b([A-Z])\.\s+(?=[A-Z]\.)/g, "$1.");
   // A possessive set as its own run leaves a space before it ("Bill Buckley
   // 's Ghost", "M'Weru 's Bodyguards").
   cleaned = cleaned.replace(/\s+(['’]s)\b/g, "$1");
@@ -2047,6 +2050,8 @@ function titleCaseWord(word: string): string {
   const lower = word.toLowerCase();
   if (TITLE_CONNECTORS.has(lower)) return lower;
   if (TITLE_ACRONYMS.has(word.toUpperCase())) return word.toUpperCase();
+  // A dotted abbreviation ("U.S.") stays as printed.
+  if (/^(?:[A-Z]\.){2,}$/.test(word)) return word;
   return lower
     .replace(/(^|[-/])([a-z])/g, (_, sep, c) => sep + c.toUpperCase())
     .replace(
@@ -2065,6 +2070,8 @@ function titleCaseTitle(title: string): string {
   const tokens = title.split(/\s+/).filter(Boolean);
   return tokens
     .map((tok, i) => {
+      // A dotted abbreviation ("U.S.") stays as printed.
+      if (/^(?:[A-Z]\.){2,}$/.test(tok)) return tok;
       const lead = tok.match(/^[^A-Za-z]*/)?.[0] ?? "";
       const trail = tok.match(/[^A-Za-z]*$/)?.[0] ?? "";
       const word = tok.slice(lead.length, tok.length - trail.length);
@@ -2114,7 +2121,8 @@ function groupNameFromPrefix(prefix: string): string {
   let sawMixed = false;
   for (let i = tokens.length - 1; i >= 0 && tokens.length - i <= 12; i--) {
     const token = tokens[i];
-    if (/\.$/.test(token)) break; // sentence end
+    // A sentence end — but not a dotted abbreviation ("U.S.").
+    if (/\.$/.test(token) && !/^(?:[A-Z]\.)+$/.test(token)) break;
     const letters = token.replace(/[^A-Za-z]/g, "");
     const mixed = letters.length >= 2 && /[a-z]/.test(letters);
     if (mixed && sawCaps && !sawMixed) break;
@@ -2286,6 +2294,9 @@ function parseSpells(text: string): string[] {
   // list; drop everything up to and including it so the comma-separated names
   // that follow are parsed rather than the preamble label itself.
   text = text.replace(/^.*\bspells\s*:\s*/is, "");
+  // A cross-reference closes the list ("Grasp of Cthulhu. See Grimoire of
+  // Cthulhu Mythos Magic").
+  text = text.replace(/\.\s+See\b[\s\S]*$/, "");
   if (!text) return [];
 
   const colon = text.indexOf(":");
@@ -2792,6 +2803,9 @@ function parseBackground(body: string): BackgroundSection[] {
       // A running header at the foot of the sheet's page ("APPENDIX D"), or
       // the lone "M" bullet that opened the next heading (Innsmouth).
       .replace(/\s*\b(?:APPENDIX|CHAPTER)\s+[A-Z0-9]{1,2}\s*$/, "")
+      // …or the next section's ALL-CAPS title ("PORTRAITS OF RECURRING
+      // NON-PLAYER CHARACTERS").
+      .replace(/\s+[A-Z][A-Z-]{3,}(?:\s+[A-Z][A-Z-]+)+\s*$/, "")
       .replace(/\s+M$/, "");
     // Skip a heading whose body is just a bullet or blank (a two-column sheet
     // stacks the headings with their fill-in text in a separate column).
@@ -2997,7 +3011,7 @@ function parseCombat(text: string): CombatEntry[] {
   // comma and a lowercase clause. Such a row bounds the damage before it.
   const maneuverName = String.raw`(?!DB\b)(?!\d)[A-Z][a-z][A-Za-z/'’-]*(?:\s[A-Z][a-z][A-Za-z/'’-]*){0,2}`;
   const maneuverRow = String.raw`${maneuverName}(?:\s*\([^),]*\))?\s*,\s*[a-z]`;
-  const damage = String.raw`(.+?)(?=\s+${nextAttack}|\s+${autoAttack}|\s+${maneuverRow}|\s+Dodge\b|(?<=\*)\s+\*|\.(?:\s|$)|${proseComma}|$)`;
+  const damage = String.raw`(.+?)(?=\s+${nextAttack}|\s+${autoAttack}|\s+${maneuverRow}|\s+Dodge\b|\s+[•·●⁃]|(?<=\*)\s+\*|\.(?:\s|$)|${proseComma}|$)`;
   // A maneuver profile carries a prose effect instead of "damage X" after its
   // "(half/fifth)" ("Garrote 45% (22/9), mnvr. to escape or suffer 1D6 damage
   // per round"). Capture that clause as the note. It runs to the next attack /
@@ -3042,6 +3056,8 @@ function parseCombat(text: string): CombatEntry[] {
   for (const match of text.matchAll(re)) {
     const commaRow = match[13] !== undefined || match[14] !== undefined;
     if (commaRow && !rowName.test(match[1].trim())) continue;
+    // "Traits: Brave, sometimes reckless" is a labelled line, not a row.
+    if (commaRow && /:\s*$/.test(text.slice(0, match.index))) continue;
     if (
       match[14] !== undefined &&
       (lastEnd < 0 || !/^\s*$/.test(text.slice(lastEnd, match.index)))
@@ -3179,13 +3195,29 @@ function splitDamageNote(raw: string | undefined): {
   if (!raw) return { damage: null, note: null };
 
   const parts: string[] = [];
-  const damage = clean(
+  let damage = clean(
     raw.replace(/\(([^)]*)\)/g, (whole: string, inner: string) => {
       if (/^[\s\d+\-*/xX.dD]+$/.test(inner)) return whole; // dice/number: keep inline
       parts.push(clean(inner));
       return " ";
     }),
   );
+  // Effect prose after the dice ("1D6, victim requires a successful maneuver
+  // to break free", "1D10 when held; in following round …") is the note. A
+  // clause holding dice or a "%" is a further damage value ("2D6+2, 1D6 per
+  // round thereafter"), and an "or …" clause a weapon alternative — both stay.
+  const effect =
+    /^([+-]?(?:\d*[dD]\d+|\d+)(?:\s*[+-]\s*(?:\d*[dD]\d+|\d+|DB))*)\s*(?:[,;]|\s+(?=(?:when|if|unless|until|while)\b))\s*(.+)$/.exec(
+      damage,
+    );
+  if (
+    effect &&
+    !/\d*[dD]\d+|%/.test(effect[2]) &&
+    !/^(?:or|and)\b/i.test(effect[2])
+  ) {
+    damage = effect[1];
+    parts.unshift(clean(effect[2]));
+  }
 
   return {
     damage: damage || null,
@@ -3469,16 +3501,23 @@ function parseNoteBeforeCombat(body: string): string {
 // ---------------------------------------------------------------------------
 
 function normalizeText(text: string): string {
-  return String(text)
-    .replace(/\u001f/g, "fi") // a "fi" ligature this font emits as U+001F ("Zombified")
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "") // strip stray C0 controls
-    .replace(/ /g, " ")
-    .replace(/�/g, "") // drop replacement chars from PDF decoding failures
-    .replace(/[‒–—―−]/g, "-") // en/em/minus dashes -> -
-    .replace(/[“”]/g, '"')
-    .replace(/[‘’]/g, "'")
-    .replace(/\s+/g, " ")
-    .trim();
+  return (
+    String(text)
+      .replace(/\u001f/g, "fi") // a "fi" ligature this font emits as U+001F ("Zombified")
+      .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "") // strip stray C0 controls
+      .replace(/ /g, " ")
+      // A period the font could not map, after a single capital of an
+      // abbreviation ("THE U � S � MARSHALS" -> "THE U.S. MARSHALS").
+      .replace(/\b([A-Z])\s*�\s*([A-Z])\s*�(?=\s|$)/g, "$1.$2.")
+      .replace(/\b([A-Z])\s*�(?=\s*(?:[A-Z]\b|\s|$))/g, "$1.")
+      .replace(/\b([A-Z])\.\s+(?=[A-Z]\.)/g, "$1.")
+      .replace(/�/g, "") // drop replacement chars from PDF decoding failures
+      .replace(/[‒–—―−]/g, "-") // en/em/minus dashes -> -
+      .replace(/[“”]/g, '"')
+      .replace(/[‘’]/g, "'")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
 }
 
 // Normalise spelled-out derived-stat labels (Quick-Start style) to the
@@ -3659,7 +3698,9 @@ function parseActors(pageItems: RawItem[][]): CocCharacter[] {
         const last = runs[runs.length - 1];
         if (
           last &&
-          /\b(?:Dr|Mr|Mrs|Ms|Prof|St|Lt|Capt|Sgt|Rev)$/.test(last.text)
+          /(?:\b(?:Dr|Mr|Mrs|Ms|Prof|St|Lt|Capt|Sgt|Rev)|(?:^|\s)[A-Z])$/.test(
+            last.text,
+          )
         )
           last.text += ".";
       }
